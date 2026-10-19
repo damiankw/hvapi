@@ -14,8 +14,8 @@ import (
 )
 
 // New returns a configured http.Server. It does not start listening.
-func New(cfg *config.Config, log *slog.Logger) *http.Server {
-	s := &state{started: time.Now()}
+func New(cfg *config.Config, log *slog.Logger, deps Deps) *http.Server {
+	s := &state{started: time.Now(), deps: deps}
 	guard := auth.New(cfg.Prefixes, cfg.KeyIDs, cfg.KeyHash, cfg.RateLimit.PerSecond, cfg.RateLimit.Burst)
 
 	// Routes that need an API key, and routes that do not (/health, the docs).

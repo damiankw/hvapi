@@ -6,7 +6,7 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 - Read-only by design: only `GET` requests, no VM changes of any kind
 - API key and IP allowlist on every request
 
-> **Status:** phase 1 (foundation). Only `/health`, `/version` and the built-in API documentation exist so far. The full endpoint plan is in `CLAUDE.md`.
+> **Status:** phase 2 (core VM data). VM inventory, summary, configuration, processor, memory, disks and network are in. Host, switch, checkpoint, event and performance endpoints are still to come; the full plan is in `CLAUDE.md`. Phase 2 has not yet been verified against a real Hyper-V host; see [Verifying on a host](#verifying-on-a-host).
 
 ## Quick start
 
@@ -56,6 +56,27 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
      -LocalPort 8085 -RemoteAddress 10.0.0.0/24 -Action Allow
    ```
 
+## Endpoints
+
+All endpoints are `GET` and need the API key except `/health`, `/docs` and `/openapi.json`. VM endpoints are served from a cache that a background poller refreshes (`poll.state_seconds` for state and load, `poll.heavy_seconds` for configuration), so a request never waits on WMI. `{id}` is the VM's GUID or its display name.
+
+| Endpoint | What it returns |
+| --- | --- |
+| `/health` | Liveness, no key needed |
+| `/version` | Build information |
+| `/status` | What the poller is doing and which WMI queries failed. Check this first when something looks empty. |
+| `/vms` | Every VM: state, health, uptime, generation, replication |
+| `/vms/summary` | The Hyper-V Manager view: load, memory, heartbeat, guest OS, checkpoints |
+| `/vms/{id}` | Everything below in one response |
+| `/vms/{id}/summary` | One VM's summary |
+| `/vms/{id}/config` | Generation, version, file paths, start/stop actions, boot settings |
+| `/vms/{id}/processor` | vCPU count, reserve, limit, weight, compatibility, per-vCPU load |
+| `/vms/{id}/memory` | Startup/min/max, dynamic memory, assigned, demand and pressure |
+| `/vms/{id}/disks` | Controllers, drives and the VHD, ISO or physical disk in each |
+| `/vms/{id}/network` | Adapters, MAC, switch, VLAN, guest addresses |
+
+Data that a host does not have (for example dynamic memory counters, or guest details when integration services are off) is left out and explained in a `notes` array rather than failing the request. A `503` with `Retry-After` means the poller has not completed its first run yet.
+
 ## API documentation
 
 The running service documents itself:
@@ -93,7 +114,22 @@ curl -H "X-API-Key: <your key>" http://10.0.0.10:8085/version
 sc.exe config hvapi obj= "DOMAIN\svc-hvapi" password= "..."
 ```
 
-From phase 2 that account needs to read Hyper-V data: membership of **Hyper-V Administrators** (and **Event Log Readers** for event endpoints).
+The account needs to read Hyper-V data: membership of **Hyper-V Administrators** (and, from phase 5, **Event Log Readers** for event endpoints). If `/status` shows access denied errors, this is the first thing to check.
+
+## Verifying on a host
+
+Phase 2 was written against the Hyper-V WMI v2 documentation and tested with recorded data, not yet on a live host. To check a host:
+
+1. Run `hvapi run` in a console and open `/status`. Every source should show `rows` greater than zero and no `error`. `dynamic_memory_counters` may legitimately be missing on some hosts.
+2. Compare `/vms/summary` with Hyper-V Manager.
+3. For anything that looks wrong, query the class directly and share the output:
+
+   ```powershell
+   .\hvapi.exe wmi "SELECT * FROM Msvm_ComputerSystem WHERE Caption = 'Virtual Machine'"
+   .\hvapi.exe wmi -ns root\cimv2 "SELECT * FROM Win32_PerfFormattedData_BalancerStats_HyperVDynamicMemoryVM"
+   ```
+
+   The `wmi` command uses the same read-only client as the service and accepts only `SELECT`, `ASSOCIATORS OF` and `REFERENCES OF`.
 
 ## Commands
 
@@ -104,6 +140,7 @@ hvapi show-config [-config path]  Print the config with every setting explained
 hvapi hash-key                    Generate a new API key and its hash
 hvapi install [-config path]      Install as a Windows service
 hvapi uninstall                   Stop and remove the service
+hvapi wmi [-ns namespace] <WQL>   Run a read-only WMI query and print the rows (Windows)
 hvapi openapi [-o file]           Print the OpenAPI document for this build
 hvapi version                     Print build information
 hvapi help [command]              Show help, or details of one command

@@ -35,18 +35,24 @@ type route struct {
 // state is what handlers close over.
 type state struct {
 	started  time.Time
+	deps     Deps
 	specOnce sync.Once
 	specJSON []byte
 }
 
 var tags = []openapi.Tag{
-	{Name: "service", Description: "Health, version and documentation of hvapi itself."},
-	// Phase 2 onwards: vms, host, switches, jobs, events, diagnostics, wmi.
+	{Name: "service", Description: "Health, version, documentation and collector status of hvapi itself."},
+	{Name: "vms", Description: "Virtual machines: inventory, state, configuration and resources. Served from a cache the background poller keeps fresh."},
+	// Phase 3 onwards: host, switches, jobs, events, diagnostics, wmi.
 }
 
 // routes is the single source of truth: every entry is both registered on
 // the mux and written into the OpenAPI document.
 func (s *state) routes() []route {
+	return append(s.serviceRoutes(), s.vmRoutes()...)
+}
+
+func (s *state) serviceRoutes() []route {
 	return []route{
 		{
 			Operation: openapi.Operation{

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"io"
@@ -10,17 +11,23 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/damiankw/hvapi/internal/config"
+	"github.com/damiankw/hvapi/internal/hyperv"
+	"github.com/damiankw/hvapi/internal/wmi"
 )
+
+func testConfig(burst int) *config.Config {
+	h := sha256.Sum256([]byte("secret"))
+	cfg := &config.Config{Prefixes: []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}, KeyIDs: []string{"mon"}, KeyHash: [][32]byte{h}}
+	cfg.RateLimit.PerSecond, cfg.RateLimit.Burst = 1, burst
+	return cfg
+}
 
 func testServer(t *testing.T) *http.Server {
 	t.Helper()
-	h := sha256.Sum256([]byte("secret"))
-	cfg := &config.Config{Prefixes: []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}, KeyIDs: []string{"mon"}, KeyHash: [][32]byte{h}}
-	cfg.RateLimit.PerSecond, cfg.RateLimit.Burst = 1, 2
-	var logs strings.Builder
-	return New(cfg, slog.New(slog.NewJSONHandler(&logs, nil)))
+	return New(testConfig(2), slog.New(slog.NewJSONHandler(io.Discard, nil)), Deps{})
 }
 
 func TestAuthAndRouting(t *testing.T) {
@@ -54,6 +61,50 @@ func TestAuthAndRouting(t *testing.T) {
 	check(do("POST", "/version", "192.0.2.5", "secret"), 405)
 	check(do("GET", "/nope", "192.0.2.5", "secret"), 404)
 	check(do("GET", "/version", "192.0.2.5", "secret"), 429)
+}
+
+// With no poller wired in, VM endpoints say the data is not collected yet.
+func TestVMEndpointsWithoutData(t *testing.T) {
+	srv := New(testConfig(100), slog.New(slog.NewJSONHandler(io.Discard, nil)), Deps{})
+	for _, path := range []string{"/vms", "/vms/summary", "/vms/x", "/vms/x/config", "/vms/x/disks"} {
+		r := httptest.NewRequest("GET", path, nil)
+		r.RemoteAddr = "192.0.2.5:1"
+		r.Header.Set("X-API-Key", "secret")
+		w := httptest.NewRecorder()
+		srv.Handler.ServeHTTP(w, r)
+		if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
+			t.Errorf("%s: got %d, want 503 with Retry-After", path, w.Code)
+		}
+	}
+}
+
+// With the poller fed by the non-Windows WMI stub, the endpoints answer with
+// empty data and notes, and unknown VMs are 404.
+func TestVMEndpointsWithStubPoller(t *testing.T) {
+	cfg := testConfig(100)
+	p := hyperv.NewPoller(wmi.New(), nil, time.Second, time.Second)
+	p.PollOnce(context.Background())
+	srv := New(cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), Deps{Data: p.Data, Status: p.Status})
+	get := func(path string) (int, string) {
+		r := httptest.NewRequest("GET", path, nil)
+		r.RemoteAddr = "192.0.2.5:1"
+		r.Header.Set("X-API-Key", "secret")
+		w := httptest.NewRecorder()
+		srv.Handler.ServeHTTP(w, r)
+		return w.Code, w.Body.String()
+	}
+	if code, body := get("/vms"); code != 200 || !strings.Contains(body, `"count": 0`) || !strings.Contains(body, "notes") {
+		t.Errorf("/vms = %d %s", code, body)
+	}
+	if code, _ := get("/vms/summary"); code != 200 {
+		t.Errorf("/vms/summary = %d", code)
+	}
+	if code, _ := get("/vms/does-not-exist"); code != 404 {
+		t.Errorf("/vms/does-not-exist = %d", code)
+	}
+	if code, body := get("/status"); code != 200 || !strings.Contains(body, `"wmi_available": false`) {
+		t.Errorf("/status = %d %s", code, body)
+	}
 }
 
 // Every route the server registers must be in the OpenAPI document with the

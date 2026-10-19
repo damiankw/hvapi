@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,10 +23,12 @@ import (
 
 	"github.com/damiankw/hvapi/internal/auth"
 	"github.com/damiankw/hvapi/internal/config"
+	"github.com/damiankw/hvapi/internal/hyperv"
 	"github.com/damiankw/hvapi/internal/server"
 	"github.com/damiankw/hvapi/internal/service"
 	"github.com/damiankw/hvapi/internal/setup"
 	"github.com/damiankw/hvapi/internal/version"
+	"github.com/damiankw/hvapi/internal/wmi"
 )
 
 func main() {
@@ -99,6 +102,19 @@ Start it with: sc.exe start ` + service.Name,
 			short: "Stop and remove the Windows service",
 			long:  `Stops the "` + service.Name + `" service if it is running and removes it. The exe and config stay.`,
 			run:   cmdUninstall,
+		},
+		{
+			name: "wmi", args: "[-ns namespace] <WQL query>",
+			short: "Run a read-only WMI query and print the rows as JSON",
+			long: `Runs one WQL query through the same read-only WMI client the service
+uses and prints the instances as JSON. Useful for checking what a host
+exposes, or why an endpoint reports a note. Only SELECT, ASSOCIATORS OF and
+REFERENCES OF are accepted. The namespace defaults to root\virtualization\v2.
+Windows only.
+
+  hvapi wmi "SELECT ElementName, EnabledState FROM Msvm_ComputerSystem"
+  hvapi wmi -ns root\cimv2 "SELECT * FROM Win32_OperatingSystem"`,
+			run: cmdWMI,
 		},
 		{
 			name: "openapi", args: "[-o file]",
@@ -207,6 +223,28 @@ func cmdUninstall(_ []string, _ io.Reader, out io.Writer) error {
 	return nil
 }
 
+func cmdWMI(args []string, _ io.Reader, out io.Writer) error {
+	fs := flag.NewFlagSet("wmi", flag.ExitOnError)
+	ns := fs.String("ns", wmi.NSVirtualization, "WMI namespace")
+	_ = fs.Parse(args)
+	query := strings.TrimSpace(strings.Join(fs.Args(), " "))
+	if query == "" {
+		return errors.New("a WQL query is required, for example: hvapi wmi \"SELECT * FROM Msvm_ComputerSystem\"")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	rows, err := wmi.New().Query(ctx, *ns, query)
+	if err != nil {
+		return err
+	}
+	if rows == nil {
+		rows = []wmi.Row{}
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(rows)
+}
+
 func cmdOpenAPI(args []string, _ io.Reader, out io.Writer) error {
 	fs := flag.NewFlagSet("openapi", flag.ExitOnError)
 	file := fs.String("o", "", "write to this file instead of standard output")
@@ -289,7 +327,14 @@ func serve(ctx context.Context, cfgPath string, asService bool) error {
 		log.Warn("listening on all interfaces; bind to the management NIC's IP instead", "listen", cfg.Listen)
 	}
 
-	srv := server.New(cfg, log)
+	// The poller fills the cache in the background; handlers only read it.
+	pollCtx, stopPoll := context.WithCancel(ctx)
+	defer stopPoll()
+	poller := hyperv.NewPoller(wmi.New(), log,
+		time.Duration(cfg.Poll.StateSeconds)*time.Second, time.Duration(cfg.Poll.HeavySeconds)*time.Second)
+	go poller.Run(pollCtx)
+
+	srv := server.New(cfg, log, server.Deps{Data: poller.Data, Status: poller.Status})
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
 	log.Info("hvapi started", "version", version.Version, "listen", cfg.Listen, "keys", len(cfg.KeyIDs), "docs", "http://"+cfg.Listen+"/docs")
