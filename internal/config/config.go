@@ -1,0 +1,143 @@
+// Package config loads and validates the hvapi configuration file.
+package config
+
+import (
+	"bytes"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"net/netip"
+	"os"
+)
+
+type APIKey struct {
+	ID     string `json:"id"`
+	SHA256 string `json:"sha256"`
+}
+
+type RateLimit struct {
+	PerSecond float64 `json:"per_second"`
+	Burst     int     `json:"burst"`
+}
+
+type Poll struct {
+	StateSeconds int `json:"state_seconds"`
+	HeavySeconds int `json:"heavy_seconds"`
+}
+
+// TLS is reserved for later; HTTPS is not enabled yet.
+type TLS struct {
+	CertFile string `json:"cert_file"`
+	KeyFile  string `json:"key_file"`
+}
+
+type Config struct {
+	Listen       string    `json:"listen"`
+	APIKeys      []APIKey  `json:"api_keys"`
+	AllowedCIDRs []string  `json:"allowed_cidrs"`
+	RateLimit    RateLimit `json:"rate_limit"`
+	LogFile      string    `json:"log_file"`
+	Poll         Poll      `json:"poll"`
+	TLS          TLS       `json:"tls"`
+
+	// Parsed forms, filled in by Load.
+	Prefixes []netip.Prefix `json:"-"`
+	KeyIDs   []string       `json:"-"`
+	KeyHash  [][32]byte     `json:"-"`
+}
+
+// Load reads, defaults and validates the config file at path.
+func Load(path string) (*Config, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	// Tolerate a UTF-8 BOM, which Notepad on older Windows adds.
+	raw = bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF})
+
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var c Config
+	if err := dec.Decode(&c); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	c.applyDefaults()
+	if err := c.validate(); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (c *Config) applyDefaults() {
+	if c.Listen == "" {
+		c.Listen = "127.0.0.1:8085"
+	}
+	if c.RateLimit.PerSecond <= 0 {
+		c.RateLimit.PerSecond = 10
+	}
+	if c.RateLimit.Burst <= 0 {
+		c.RateLimit.Burst = 20
+	}
+	if c.Poll.StateSeconds <= 0 {
+		c.Poll.StateSeconds = 10
+	}
+	if c.Poll.HeavySeconds <= 0 {
+		c.Poll.HeavySeconds = 60
+	}
+}
+
+func (c *Config) validate() error {
+	var errs []error
+
+	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
+		errs = append(errs, fmt.Errorf("listen %q: %w", c.Listen, err))
+	}
+
+	if len(c.APIKeys) == 0 {
+		errs = append(errs, errors.New("api_keys: at least one key is required"))
+	}
+	seen := map[string]bool{}
+	for i, k := range c.APIKeys {
+		if k.ID == "" {
+			errs = append(errs, fmt.Errorf("api_keys[%d]: id is required", i))
+		}
+		if seen[k.ID] {
+			errs = append(errs, fmt.Errorf("api_keys[%d]: duplicate id %q", i, k.ID))
+		}
+		seen[k.ID] = true
+		b, err := hex.DecodeString(k.SHA256)
+		if err != nil || len(b) != 32 {
+			errs = append(errs, fmt.Errorf("api_keys[%d]: sha256 must be 64 hex characters (generate one with 'hvapi hash-key')", i))
+			continue
+		}
+		var h [32]byte
+		copy(h[:], b)
+		c.KeyIDs = append(c.KeyIDs, k.ID)
+		c.KeyHash = append(c.KeyHash, h)
+	}
+
+	if len(c.AllowedCIDRs) == 0 {
+		errs = append(errs, errors.New("allowed_cidrs: at least one range is required"))
+	}
+	for i, s := range c.AllowedCIDRs {
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			// Accept a bare IP as a single-host range.
+			a, aerr := netip.ParseAddr(s)
+			if aerr != nil {
+				errs = append(errs, fmt.Errorf("allowed_cidrs[%d] %q: not a CIDR range or IP address", i, s))
+				continue
+			}
+			p = netip.PrefixFrom(a, a.BitLen())
+		}
+		c.Prefixes = append(c.Prefixes, p.Masked())
+	}
+
+	if c.TLS.CertFile != "" || c.TLS.KeyFile != "" {
+		errs = append(errs, errors.New("tls: HTTPS is not implemented yet; leave cert_file and key_file empty"))
+	}
+
+	return errors.Join(errs...)
+}

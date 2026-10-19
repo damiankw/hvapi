@@ -1,0 +1,7 @@
+# Build output
+/dist/
+*.exe
+
+# Local config and logs (may contain key hashes)
+config.json
+*.log
