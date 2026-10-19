@@ -19,12 +19,13 @@ jobs:
         with:
           go-version: '1.22'
 
-      # Creates go.sum if it is not committed yet.
       - name: Resolve modules
         run: go mod tidy
 
-      - name: Vet (Windows target)
-        run: GOOS=windows GOARCH=amd64 go vet ./...
+      - name: Vet
+        run: |
+          go vet ./...
+          GOOS=windows GOARCH=amd64 go vet ./...
 
       - name: Test
         run: go test ./...
@@ -33,6 +34,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME}"
           [[ "${GITHUB_REF_TYPE}" == "tag" ]] || VERSION="dev-${GITHUB_SHA::7}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
           mkdir -p dist
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
             -ldflags "-s -w \
@@ -41,6 +43,11 @@ jobs:
               -X github.com/damiankw/hvapi/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -o dist/hvapi.exe ./cmd/hvapi
           cp config.example.json dist/
+
+      - name: Generate API documentation
+        run: |
+          go run -ldflags "-X github.com/damiankw/hvapi/internal/version.Version=${VERSION}" \
+            ./cmd/hvapi openapi -o dist/openapi.json
 
       - uses: actions/upload-artifact@v4
         with:
@@ -54,3 +61,4 @@ jobs:
           files: |
             dist/hvapi.exe
             dist/config.example.json
+            dist/openapi.json

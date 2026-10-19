@@ -42,14 +42,39 @@ type Config struct {
 	Poll         Poll      `json:"poll"`
 	TLS          TLS       `json:"tls"`
 
-	// Parsed forms, filled in by Load.
+	// Parsed forms, filled in by Validate.
 	Prefixes []netip.Prefix `json:"-"`
 	KeyIDs   []string       `json:"-"`
 	KeyHash  [][32]byte     `json:"-"`
 }
 
+// Defaults applied by ApplyDefaults to fields left empty or zero.
+const (
+	DefaultListen       = "127.0.0.1:8085"
+	DefaultPort         = "8085"
+	DefaultPerSecond    = 10
+	DefaultBurst        = 20
+	DefaultStateSeconds = 10
+	DefaultHeavySeconds = 60
+	DefaultLogFile      = "hvapi.log"
+)
+
 // Load reads, defaults and validates the config file at path.
 func Load(path string) (*Config, error) {
+	c, err := Read(path)
+	if err != nil {
+		return nil, err
+	}
+	c.ApplyDefaults()
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// Read parses the config file at path as written, without applying defaults
+// or validating it. Unknown fields are rejected so typos are caught early.
+func Read(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
@@ -63,33 +88,33 @@ func Load(path string) (*Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	c.applyDefaults()
-	if err := c.validate(); err != nil {
-		return nil, err
-	}
 	return &c, nil
 }
 
-func (c *Config) applyDefaults() {
+// ApplyDefaults fills in the documented defaults for empty or zero fields.
+func (c *Config) ApplyDefaults() {
 	if c.Listen == "" {
-		c.Listen = "127.0.0.1:8085"
+		c.Listen = DefaultListen
 	}
 	if c.RateLimit.PerSecond <= 0 {
-		c.RateLimit.PerSecond = 10
+		c.RateLimit.PerSecond = DefaultPerSecond
 	}
 	if c.RateLimit.Burst <= 0 {
-		c.RateLimit.Burst = 20
+		c.RateLimit.Burst = DefaultBurst
 	}
 	if c.Poll.StateSeconds <= 0 {
-		c.Poll.StateSeconds = 10
+		c.Poll.StateSeconds = DefaultStateSeconds
 	}
 	if c.Poll.HeavySeconds <= 0 {
-		c.Poll.HeavySeconds = 60
+		c.Poll.HeavySeconds = DefaultHeavySeconds
 	}
 }
 
-func (c *Config) validate() error {
+// Validate checks the config and fills in the parsed Prefixes, KeyIDs and
+// KeyHash fields. It returns every problem found, joined, not just the first.
+func (c *Config) Validate() error {
 	var errs []error
+	c.Prefixes, c.KeyIDs, c.KeyHash = nil, nil, nil
 
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		errs = append(errs, fmt.Errorf("listen %q: %w", c.Listen, err))
@@ -107,13 +132,11 @@ func (c *Config) validate() error {
 			errs = append(errs, fmt.Errorf("api_keys[%d]: duplicate id %q", i, k.ID))
 		}
 		seen[k.ID] = true
-		b, err := hex.DecodeString(k.SHA256)
-		if err != nil || len(b) != 32 {
-			errs = append(errs, fmt.Errorf("api_keys[%d]: sha256 must be 64 hex characters (generate one with 'hvapi hash-key')", i))
+		h, err := ParseHash(k.SHA256)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("api_keys[%d]: %w", i, err))
 			continue
 		}
-		var h [32]byte
-		copy(h[:], b)
 		c.KeyIDs = append(c.KeyIDs, k.ID)
 		c.KeyHash = append(c.KeyHash, h)
 	}
@@ -122,17 +145,12 @@ func (c *Config) validate() error {
 		errs = append(errs, errors.New("allowed_cidrs: at least one range is required"))
 	}
 	for i, s := range c.AllowedCIDRs {
-		p, err := netip.ParsePrefix(s)
+		p, err := ParseCIDR(s)
 		if err != nil {
-			// Accept a bare IP as a single-host range.
-			a, aerr := netip.ParseAddr(s)
-			if aerr != nil {
-				errs = append(errs, fmt.Errorf("allowed_cidrs[%d] %q: not a CIDR range or IP address", i, s))
-				continue
-			}
-			p = netip.PrefixFrom(a, a.BitLen())
+			errs = append(errs, fmt.Errorf("allowed_cidrs[%d]: %w", i, err))
+			continue
 		}
-		c.Prefixes = append(c.Prefixes, p.Masked())
+		c.Prefixes = append(c.Prefixes, p)
 	}
 
 	if c.TLS.CertFile != "" || c.TLS.KeyFile != "" {
@@ -140,4 +158,28 @@ func (c *Config) validate() error {
 	}
 
 	return errors.Join(errs...)
+}
+
+// ParseHash checks that s is a hex-encoded SHA-256 hash and returns it.
+func ParseHash(s string) ([32]byte, error) {
+	var h [32]byte
+	b, err := hex.DecodeString(s)
+	if err != nil || len(b) != 32 {
+		return h, errors.New("sha256 must be 64 hex characters (generate one with 'hvapi hash-key')")
+	}
+	copy(h[:], b)
+	return h, nil
+}
+
+// ParseCIDR parses a CIDR range, or a bare IP address as a single-host range.
+func ParseCIDR(s string) (netip.Prefix, error) {
+	p, err := netip.ParsePrefix(s)
+	if err != nil {
+		a, aerr := netip.ParseAddr(s)
+		if aerr != nil {
+			return netip.Prefix{}, fmt.Errorf("%q: not a CIDR range or IP address", s)
+		}
+		p = netip.PrefixFrom(a, a.BitLen())
+	}
+	return p.Masked(), nil
 }

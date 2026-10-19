@@ -14,12 +14,14 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 - **Architecture:** a background poller fills an in-memory cache; handlers serve from the cache. Only the thumbnail and VHD state calls run on demand, with short timeouts.
 - **Security:** plain HTTP for now (internal only, HTTPS deliberately deferred; config reserves a `tls` block). API key in the `X-API-Key` header, stored as SHA-256 hashes, constant-time compare. IP allowlist in the app and Windows Firewall. Per-key rate limit. Requests logged with key ID, never the key.
 - **Missing data:** if a class doesn't exist on a host (older OS, no cluster), return an empty result with a note; never fail the whole request.
+- **API documentation:** generated, not hand-written. `internal/server/routes.go` is a route table; each entry both registers the handler and describes the operation. `internal/openapi` turns the table and the Go response types (with `json` and `doc` struct tags) into an OpenAPI 3.0 document. It is served at `/openapi.json` (no key), rendered by Swagger UI at `/docs` (CDN-loaded, pinned version), printed by `hvapi openapi`, and attached to CI artifacts and releases. A test fails if a route is missing from the document. Every new endpoint must be added to the table with a summary, description and a typed response.
+- **CLI:** `cmd/hvapi/main.go` builds on every OS; the service package has non-Windows stubs. Commands live in one table (`commands()`), which also drives `hvapi help`. `configure` (guided setup) and `show-config` (annotated dump) are in `internal/setup`; their explanations come from `config.Fields`, the single list of setting descriptions.
 - **Dependencies:** keep them minimal. Standard library first; `golang.org/x/sys` for Windows APIs; a WMI library (go-ole based: `yusufpapurcu/wmi` or `microsoft/wmi`) to be chosen in phase 2.
 - **Build:** GitHub Actions builds `hvapi.exe` on push to `main` and publishes a release on `v*` tags. `go.sum` is committed; CI still runs `go mod tidy` as a safety net.
 
 ## Status
 
-**Phase 1 (foundation) is done:** config loading and validation, API key, IP allowlist, rate limit, JSON logging, Windows service install/uninstall/run, `hash-key` command, `/health` (no key) and `/version`. Tests in `internal/server/server_test.go`.
+**Phase 1 (foundation) is done:** config loading and validation, API key, IP allowlist, rate limit, JSON logging, Windows service install/uninstall/run, `hash-key`, `configure`, `show-config`, `help` and `openapi` commands, `/health` (no key), `/version`, `/openapi.json` and `/docs`. Tests sit next to each package.
 
 ## Build phases
 
@@ -28,7 +30,7 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 3. Host and networking: all `/host/*` endpoints and `/switches/*`.
 4. Deep VM detail: `integration`, `kvp`, `checkpoints`, `disks/{diskId}/state`, `replication`, `devices`, `security`, `metering`, `thumbnail`.
 5. Activity and performance: `/jobs`, `/events`, `/events/{log}`, host and VM `/perf`.
-6. Analysis: `/diagnostics`, `/metrics` (Prometheus), raw `/wmi/classes` and `/wmi/{class}`, `docs/API.md`.
+6. Analysis: `/diagnostics`, `/metrics` (Prometheus), raw `/wmi/classes` and `/wmi/{class}`. (API reference is generated; see the API documentation decision above.)
 
 ## Endpoint plan and data sources
 

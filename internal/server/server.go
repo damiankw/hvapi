@@ -10,42 +10,31 @@ import (
 
 	"github.com/damiankw/hvapi/internal/auth"
 	"github.com/damiankw/hvapi/internal/config"
-	"github.com/damiankw/hvapi/internal/version"
+	"github.com/damiankw/hvapi/internal/openapi"
 )
 
 // New returns a configured http.Server. It does not start listening.
 func New(cfg *config.Config, log *slog.Logger) *http.Server {
-	started := time.Now()
+	s := &state{started: time.Now()}
 	guard := auth.New(cfg.Prefixes, cfg.KeyIDs, cfg.KeyHash, cfg.RateLimit.PerSecond, cfg.RateLimit.Burst)
 
-	// Routes that need an API key.
+	// Routes that need an API key, and routes that do not (/health, the docs).
 	keyed := http.NewServeMux()
-	keyed.HandleFunc("GET /version", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{
-			"version":    version.Version,
-			"commit":     version.Commit,
-			"build_date": version.Date,
-			"go":         runtime.Version(),
-		})
-	})
-	// Phase 2 onwards: /vms, /host, /switches and the rest register here.
+	open := http.NewServeMux()
+	for _, r := range s.routes() {
+		mux := open
+		if r.Auth {
+			mux = keyed
+		}
+		mux.HandleFunc(r.Method+" "+r.Path, r.handler)
+	}
 	keyed.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		writeJSON(w, http.StatusNotFound, openapi.Error{Error: "not found"})
 	})
-
-	// Top-level mux: /health needs no key; everything else goes through RequireKey.
-	root := http.NewServeMux()
-	root.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status":         "ok",
-			"started_at":     started.UTC().Format(time.RFC3339),
-			"uptime_seconds": int64(time.Since(started).Seconds()),
-		})
-	})
-	root.Handle("/", guard.RequireKey(keyed))
+	open.Handle("/", guard.RequireKey(keyed))
 
 	// Every request: IP allowlist first, then logging around everything.
-	handler := logRequests(log, guard.AllowIP(readOnly(root)))
+	handler := logRequests(log, guard.AllowIP(readOnly(open)))
 
 	return &http.Server{
 		Addr:              cfg.Listen,
@@ -59,12 +48,17 @@ func New(cfg *config.Config, log *slog.Logger) *http.Server {
 	}
 }
 
+// Spec returns the OpenAPI document for this build as indented JSON.
+func Spec() []byte {
+	return (&state{}).spec()
+}
+
 // readOnly rejects any method other than GET and HEAD before routing.
 func readOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "read-only API: only GET is supported"})
+			writeJSON(w, http.StatusMethodNotAllowed, openapi.Error{Error: "read-only API: only GET is supported"})
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -118,3 +112,6 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(v)
 }
+
+// goVersion is reported by /version.
+func goVersion() string { return runtime.Version() }

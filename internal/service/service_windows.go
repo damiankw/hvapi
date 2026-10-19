@@ -1,6 +1,5 @@
 //go:build windows
 
-// Package service installs, removes and runs hvapi as a Windows service.
 package service
 
 import (
@@ -12,12 +11,6 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
-)
-
-const (
-	Name        = "hvapi"
-	DisplayName = "Hyper-V Diagnostics API"
-	Description = "Read-only HTTP API exposing Hyper-V diagnostic data."
 )
 
 // IsService reports whether the process was started by the Service Control Manager.
