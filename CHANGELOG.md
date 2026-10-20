@@ -12,6 +12,7 @@ Analysis. This completes the planned feature set.
 - `/metrics`: Prometheus text format with VM state, CPU, memory, heartbeat, checkpoints and replication health; host CPU, memory, uptime and VM counts; services, volumes, jobs, events, cluster nodes; and the diagnostics status and finding counts.
 - `/wmi/classes` and `/wmi/{class}`: raw, read-only access to an allowlist of WMI classes.
 - The API key is also accepted as `Authorization: Bearer <key>`, so Prometheus can scrape with its standard configuration.
+- `Test-Hvapi.ps1`, included in the release zip: calls every endpoint the running service documents, with parameters taken from the host, runs three security checks, and reports PASS, WARN, FAIL or SKIP per endpoint with a summary and exit code.
 
 ## 0.6.0 - 2026-10-20
 

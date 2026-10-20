@@ -221,6 +221,25 @@ sc.exe config hvapi obj= "DOMAIN\svc-hvapi" password= "..."
 
 The account needs to read Hyper-V data: membership of **Hyper-V Administrators**, plus **Event Log Readers** for `/events`. If `/status` shows access denied errors, or `/events` lists a `read failed` error for every log, this is the first thing to check.
 
+## Testing an installation
+
+`Test-Hvapi.ps1` ships in the release zip. It reads the endpoint list from the running service, calls every endpoint with real parameters taken from the host (a VM, one of its disks, a switch), checks that a wrong key, a missing key and a POST are rejected, and prints a table and a summary:
+
+```powershell
+.\Test-Hvapi.ps1 -Uri https://10.0.0.10:8085 -ApiKey <your key>
+.\Test-Hvapi.ps1 -Uri https://10.0.0.10:8085 -ApiKey <your key> -SkipCertificateCheck   # self-signed certificate
+.\Test-Hvapi.ps1 -Uri https://10.0.0.10:8085 -ApiKey <your key> -VM "Web Server" -Json  # pick the VM, machine-readable output
+```
+
+| Result | Meaning |
+| --- | --- |
+| `PASS` | 200 with data |
+| `WARN` | 200 but something was missing: a `notes` entry, an empty list, or an expected condition such as a thumbnail of a VM that is off |
+| `FAIL` | Error status, timeout or unreadable response |
+| `SKIP` | Nothing on the host to test it with (no VM, no VHD, no switch) |
+
+The exit code is 1 when anything failed, 2 when the service could not be reached. It waits and retries when it hits the per-key rate limit, so it is safe with the default limits. Works in Windows PowerShell 5.1 and PowerShell 7.
+
 ## Troubleshooting
 
 **Empty `/vms` or notes everywhere.** Open `/status`. Its `warnings` say when the start-up check failed, and each source shows its row count and error. "Access denied" means the account cannot read Hyper-V WMI: use an elevated prompt for `run`, or for the service put its account in Hyper-V Administrators. "Namespace not found" means the Hyper-V role is not installed.

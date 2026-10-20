@@ -86,10 +86,10 @@ jobs:
             -X github.com/damiankw/hvapi/internal/version.Date=${DATE}"
           mkdir -p dist
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LD" -o dist/hvapi.exe ./cmd/hvapi
-          cp config.example.json README.md LICENSE dist/
+          cp config.example.json README.md LICENSE scripts/Test-Hvapi.ps1 dist/
           go run -ldflags "$LD" ./cmd/hvapi openapi -o dist/openapi.json
-          (cd dist && zip -q "hvapi-${V}-windows-amd64.zip" hvapi.exe config.example.json openapi.json README.md LICENSE)
-          (cd dist && sha256sum hvapi.exe "hvapi-${V}-windows-amd64.zip" config.example.json openapi.json > SHA256SUMS.txt)
+          (cd dist && zip -q "hvapi-${V}-windows-amd64.zip" hvapi.exe config.example.json openapi.json README.md LICENSE Test-Hvapi.ps1)
+          (cd dist && sha256sum hvapi.exe "hvapi-${V}-windows-amd64.zip" config.example.json openapi.json Test-Hvapi.ps1 > SHA256SUMS.txt)
           cat dist/SHA256SUMS.txt
 
       - name: Release notes from CHANGELOG.md
@@ -120,4 +120,5 @@ jobs:
             dist/hvapi.exe
             dist/config.example.json
             dist/openapi.json
+            dist/Test-Hvapi.ps1
             dist/SHA256SUMS.txt

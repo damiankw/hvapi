@@ -23,6 +23,7 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 - **Response shape:** every VM response carries `collected_at` and `notes`. A missing optional source is a note, never an error. `503` with `Retry-After` only before the first poll completes. `/status` exposes every source's row count and error for debugging on the host.
 - **Build and release:** `.github/workflows/ci.yml` runs on every push and PR (tidy check, gofmt, vet for both targets, tests, dev build artifact). `.github/workflows/release.yml` runs on `v*` tags or manually from the Actions tab with a version input (it then creates the tag); it builds with version ldflags, packages a zip plus `SHA256SUMS.txt`, takes release notes from the matching `## x.y.z` section of `CHANGELOG.md`, and marks suffixed versions (`-beta.1`) as pre-releases. **Every release needs a CHANGELOG.md section first.** CI uses the latest stable Go; `go.mod` states the minimum (1.22). `go.sum` is committed.
 - **Licence:** MIT (`LICENSE`).
+- **Installation test:** `scripts/Test-Hvapi.ps1` (shipped in the zip) discovers endpoints from `/openapi.json`, so it needs no change when endpoints are added, and substitutes `{id}`, `{diskId}`, `{log}` and `{class}` from live data. It retries on 429. Tested here with PowerShell 7 on Linux against the stub build; Windows PowerShell 5.1 paths (stream-read error bodies, ServicePointManager for self-signed certificates) are written for compatibility but only verified by review.
 
 ## Status
 
