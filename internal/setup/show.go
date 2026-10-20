@@ -86,6 +86,8 @@ func writeSummary(out io.Writer, cfgPath string, c *config.Config, raw *config.C
 
 	setting("events.hours", fmt.Sprint(c.Events.Hours)+mark(raw != nil && raw.Events.Hours <= 0))
 	setting("events.max_per_log", fmt.Sprint(c.Events.MaxPerLog)+mark(raw != nil && raw.Events.MaxPerLog <= 0))
+	setting("diagnostics.checkpoint_days", fmt.Sprint(c.Diagnostics.CheckpointDays)+mark(raw != nil && raw.Diagnostics.CheckpointDays <= 0))
+	setting("diagnostics.free_space_percent", fmt.Sprint(c.Diagnostics.FreeSpacePercent)+mark(raw != nil && raw.Diagnostics.FreeSpacePercent <= 0))
 	setting("log_rotate.max_mb", fmt.Sprint(c.LogRotate.MaxMB)+mark(raw != nil && raw.LogRotate.MaxMB <= 0))
 	setting("log_rotate.keep", fmt.Sprint(c.LogRotate.Keep)+mark(raw != nil && raw.LogRotate.Keep == 0))
 

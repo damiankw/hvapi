@@ -26,6 +26,10 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 
 ## Status
 
+**All seven planned phases are built.** The endpoint set in the plan below is complete. What remains is verification on real hosts (see the per-phase notes) and whatever the owner asks for next.
+
+**Phase 7 (analysis) is done (v0.7.0):** `/diagnostics` (`internal/hyperv/diagnostics.go`: one function running every rule over the cache, findings sorted by severity, thresholds from `diagnostics.*` config with query overrides), `/metrics` (`metrics.go`: hand-written Prometheus text format, no client library; gauges only, labels escaped), `/wmi/classes` and `/wmi/{class}` (`raw.go`: the allowlist is every class the poller reads plus `extraRawClasses`; always `SELECT *`; `OnDemand` now also carries a `wmi.Querier`). `auth.KeyFromRequest` accepts `Authorization: Bearer <key>` as well as `X-API-Key`, so Prometheus can scrape with its standard `authorization` block.
+
 **Phase 1 (foundation) is done:** config loading and validation, API key, IP allowlist, rate limit, JSON logging, Windows service install/uninstall/run, `hash-key`, `configure`, `show-config`, `help` and `openapi` commands, `/health` (no key), `/version`, `/openapi.json` and `/docs`. Tests sit next to each package.
 
 **Phase 6 (activity and performance) is done (v0.6.0):** `/jobs` (Msvm_ConcreteJob and Msvm_StorageJob, deduplicated by InstanceID; `failed` for Terminated/Killed/Exception or an error code, `stuck` for running over an hour), `/events` and `/events/{log}` from `internal/evtlog` (wevtapi via syscalls: EvtQuery with reverse direction, EvtNext, EvtRender to XML, EvtFormatMessage with cached publisher metadata; `ParseXML` reads System, EventData and UserData and picks out a VM GUID), read on the settings poll into `SettingsData.events` bounded by `events.hours` and `events.max_per_log`; the scheduler type for `/host/hypervisor` comes from event ID 2 of the Hypervisor-Operational log. `/vms/{id}/perf` matches counter instances by name: VPs by "<VM name>:" prefix, NICs by VM-name prefix or adapter GUID, disks by the VHD path with `\` replaced by `-`. `/host/perf` gained host NICs, logical disks and virtual switch counters. **Counter instance name formats and class names are from documentation and memory, not a host: check `/status` and `/vms/{id}/perf` on real hardware.**
@@ -48,7 +52,7 @@ Each phase ships as a minor version: phase N is released as v0.N.0, with patch r
 4. Host and networking: done (v0.4.0).
 5. Deep VM detail: done (v0.5.0).
 6. Activity and performance: done (v0.6.0).
-7. Analysis (v0.7.0): `/diagnostics`, `/metrics` (Prometheus), raw `/wmi/classes` and `/wmi/{class}`. (API reference is generated; see the API documentation decision above.)
+7. Analysis: done (v0.7.0).
 
 ## Endpoint plan and data sources
 
@@ -62,7 +66,7 @@ Networking, jobs, events: `/switches`, `/switches/{id}`, `/switches/{id}/ports`,
 
 Raw: `/wmi/classes`, `/wmi/{class}` (allowlisted classes only, `ExecQuery` only).
 
-Diagnostics rules: missing heartbeat on a running VM, broken checkpoint chain, old checkpoints (default 7 days), low free space on VM volumes (default 10%), replication Warning/Critical, failed or stuck jobs, integration services disabled or outdated, core Hyper-V services stopped, error events in the last 24 hours.
+Diagnostics rules (implemented): missing heartbeat on a running VM, checkpoint disk missing (chain broken), old checkpoints (default 7 days), VM disk file unreadable, low free space on VM volumes (default 10%, critical at half), volume health, replication Warning/Critical, VM health, failed or stuck jobs, integration services disabled, adapter disconnected, core Hyper-V services stopped, host memory pressure and CPU, cluster node down or resource failed, error events in the cached window. "Integration services outdated" is not implemented: the host does not expose the current version to compare with.
 
 Perf counter class names are unconfirmed; verify on a real host before relying on them.
 

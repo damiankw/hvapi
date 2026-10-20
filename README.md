@@ -7,7 +7,7 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 - HTTPS built in, API key and IP allowlist on every request
 - Documents itself: Swagger UI at `/docs`, OpenAPI at `/openapi.json`
 
-> **Status:** 0.6.x covers the VMs in depth (inventory, summary, configuration, processor, memory, disks and disk state, network, integration services, key-value pairs, checkpoints, replication, devices, security, metering, performance counters, console thumbnails), the host (hardware, OS, services, storage, network, performance, NUMA, hypervisor, migration, cluster), virtual switches, jobs and the Hyper-V event logs, all over HTTPS. Diagnostics and Prometheus metrics are planned; the roadmap is in `CLAUDE.md`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+> **Status:** 0.7.x completes the planned feature set: the VMs in depth (inventory, summary, configuration, processor, memory, disks and disk state, network, integration services, key-value pairs, checkpoints, replication, devices, security, metering, performance counters, console thumbnails), the host (hardware, OS, services, storage, network, performance, NUMA, hypervisor, migration, cluster), virtual switches, jobs, the Hyper-V event logs, a diagnostics report, Prometheus metrics and raw WMI access, all over HTTPS. Changes are listed in [CHANGELOG.md](CHANGELOG.md); the design notes are in `CLAUDE.md`.
 
 ## Secure the connection first
 
@@ -61,6 +61,7 @@ In every case, keep the Windows Firewall rule limited to the addresses that need
    | `log_rotate` | `max_mb` at which the log is rotated and `keep`, the number of old logs retained, so the log never grows without limit. |
    | `poll` | How often the cache is refreshed: `state_seconds` for VM state and load, `heavy_seconds` for configuration. |
    | `events` | `hours` of Hyper-V event logs to cache and `max_per_log`. |
+   | `diagnostics` | Default thresholds for `/diagnostics`: `checkpoint_days` and `free_space_percent`. |
    | `tls` | `cert_file` and `key_file` (PEM, relative to `config.json`) turn on HTTPS; `min_version` is `1.2` or `1.3`. Empty means plain HTTP. |
 
 5. Test it from an **elevated** console (Run as administrator), because reading Hyper-V data needs it:
@@ -116,6 +117,10 @@ All endpoints are `GET` and need the API key except `/health`, `/docs` and `/ope
 | `/jobs` | Running and recent Hyper-V jobs with `failed` and `stuck` flags |
 | `/events` | Hyper-V event logs from the last `events.hours`, newest first; `?level=&hours=&limit=&id=&vm=` |
 | `/events/{log}` | One log: `vmms`, `worker`, `hypervisor`, `compute`, `vmswitch` or `high-availability` |
+| `/diagnostics` | Findings from every rule (below), most severe first, with `status` ok, warning or critical |
+| `/metrics` | Prometheus text format: VM, host, volume, service, job, event and diagnostics gauges |
+| `/wmi/classes` | The classes `/wmi/{class}` may read |
+| `/wmi/{class}` | **On demand:** `SELECT * FROM` an allowlisted class, raw rows (`?limit=`) |
 | `/host` | Hardware, OS, memory, processors, Hyper-V defaults, VM counts |
 | `/host/services` | vmms, vmcompute and hvhost state; `all_running` to alert on |
 | `/host/storage` | Volumes and cluster shared volumes with free space, health and which VMs live there |
@@ -132,6 +137,48 @@ All endpoints are `GET` and need the API key except `/health`, `/docs` and `/ope
 Data that a host does not have (for example dynamic memory counters, or guest details when integration services are off) is left out and explained in a `notes` array rather than failing the request. A `503` with `Retry-After` means the poller has not completed its first run yet.
 
 The two **on demand** endpoints are the only ones that touch the host when called. They use the read-only WMI methods `GetVirtualHardDiskSettingData`, `GetVirtualHardDiskState` and `GetVirtualSystemThumbnailImage`, with a 20 second timeout (`504` when exceeded), and disk results are cached for 30 seconds. Everything else is served from the cache.
+
+## Diagnostics and monitoring
+
+`/diagnostics` applies these rules to the cache and returns findings, each with a stable `rule` name for alert routing:
+
+| Rule | Severity | Means |
+| --- | --- | --- |
+| `services_stopped` | critical | vmms, vmcompute or hvhost is not running |
+| `vm_health` | warning or critical | Hyper-V reports the VM as degraded or failed |
+| `heartbeat_missing` | warning | A running VM's guest heartbeat is No Contact, Lost Communication or Error |
+| `integration_disabled` | info | Heartbeat or data exchange is disabled on a running VM |
+| `adapter_disconnected` | info | A running VM has an adapter not connected to a switch |
+| `replication_health` | warning or critical | Hyper-V Replica reports Warning or Critical |
+| `checkpoint_old` | warning | A checkpoint is older than `diagnostics.checkpoint_days` (default 7) |
+| `checkpoint_disk_missing` | critical | A checkpoint's differencing disk cannot be read: the chain may be broken |
+| `vm_disk_missing` | warning | A VM's virtual hard disk cannot be read by the service account |
+| `volume_low_space` | warning or critical | A volume holding VM files is below `diagnostics.free_space_percent` (default 10; critical below half) |
+| `volume_health` | warning | A VM volume is not Healthy |
+| `job_failed`, `job_stuck` | warning | A Hyper-V job failed, or has run for over an hour |
+| `host_memory_pressure` | warning | The dynamic memory balancer is at or above 100% |
+| `host_cpu_high` | warning | Hypervisor logical processors are 90% busy or more |
+| `cluster_node_down`, `cluster_resource_failed` | warning, critical | A cluster node is not Up, or a resource has failed |
+| `event_errors` | warning or critical | Error (or critical) events in a Hyper-V log within `events.hours` |
+
+Override the two thresholds per request with `?checkpoint_days=` and `?free_space_percent=`.
+
+**Prometheus** scrapes `/metrics`. The API key can be sent as a bearer token, which is the standard way:
+
+```yaml
+scrape_configs:
+  - job_name: hvapi
+    scheme: https
+    authorization:
+      credentials: <your key>
+    static_configs:
+      - targets: ["10.0.0.10:8085"]
+    # With a self-signed certificate: tls_config: { ca_file: hvapi-cert.pem }
+```
+
+`hvapi_diagnostics_status` (0 ok, 1 warning, 2 critical) is the single number to alert on; the rest let you graph the rest.
+
+**Raw WMI.** `/wmi/{class}` returns a class's instances exactly as WMI reports them, for anything the shaped endpoints do not cover. Only classes in `/wmi/classes` are allowed and only `SELECT *` is ever run.
 
 ## API documentation
 
@@ -159,7 +206,7 @@ curl -H "X-API-Key: <your key>" https://10.0.0.10:8085/version
 
 | Code | Meaning |
 | --- | --- |
-| `401` | Missing or wrong API key |
+| `401` | Missing or wrong API key (`X-API-Key` header, or `Authorization: Bearer <key>`) |
 | `403` | Caller's IP is not in `allowed_cidrs` |
 | `405` | Anything other than `GET` |
 | `429` | Rate limit exceeded |

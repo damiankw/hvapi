@@ -252,7 +252,7 @@ func TestDiskState(t *testing.T) {
 		state:    map[string]string{leaf: `<INSTANCE CLASSNAME="Msvm_VirtualHardDiskState"><PROPERTY NAME="FileSize" TYPE="uint64"><VALUE>4294967296</VALUE></PROPERTY><PROPERTY NAME="InUse" TYPE="boolean"><VALUE>true</VALUE></PROPERTY><PROPERTY NAME="FragmentationPercentage" TYPE="uint32"><VALUE>7</VALUE></PROPERTY><PROPERTY NAME="MinInternalSize" TYPE="uint64"><VALUE>2147483648</VALUE></PROPERTY></INSTANCE>`},
 	}
 	now := time.Now()
-	od := NewOnDemand(fc, func() *Data { return d })
+	od := NewOnDemand(fc, nil, func() *Data { return d })
 	od.now = func() time.Time { return now }
 	st, err := od.DiskState(context.Background(), "Web Server", "scsi0-0")
 	if err != nil {
@@ -300,7 +300,7 @@ func TestThumbnail(t *testing.T) {
 	d := poll(t, deepFixtures())
 	// 2x1 image: pure red (0xF800) then pure blue (0x001F), little endian.
 	fc := &fakeCaller{thumb: []byte{0x00, 0xF8, 0x1F, 0x00}}
-	od := NewOnDemand(fc, func() *Data { return d })
+	od := NewOnDemand(fc, nil, func() *Data { return d })
 	pngBytes, err := od.Thumbnail(context.Background(), "Web Server", 2, 1)
 	if err != nil {
 		t.Fatal(err)

@@ -29,6 +29,12 @@ type Poll struct {
 	HeavySeconds int `json:"heavy_seconds"`
 }
 
+// Diagnostics holds the thresholds /diagnostics uses by default.
+type Diagnostics struct {
+	CheckpointDays   int `json:"checkpoint_days"`
+	FreeSpacePercent int `json:"free_space_percent"`
+}
+
 // Events bounds what is read from the Hyper-V event logs on each heavy poll.
 type Events struct {
 	Hours     int `json:"hours"`
@@ -51,15 +57,16 @@ type LogRotate struct {
 }
 
 type Config struct {
-	Listen       string    `json:"listen"`
-	APIKeys      []APIKey  `json:"api_keys"`
-	AllowedCIDRs []string  `json:"allowed_cidrs"`
-	RateLimit    RateLimit `json:"rate_limit"`
-	LogFile      string    `json:"log_file"`
-	LogRotate    LogRotate `json:"log_rotate"`
-	Poll         Poll      `json:"poll"`
-	Events       Events    `json:"events"`
-	TLS          TLS       `json:"tls"`
+	Listen       string      `json:"listen"`
+	APIKeys      []APIKey    `json:"api_keys"`
+	AllowedCIDRs []string    `json:"allowed_cidrs"`
+	RateLimit    RateLimit   `json:"rate_limit"`
+	LogFile      string      `json:"log_file"`
+	LogRotate    LogRotate   `json:"log_rotate"`
+	Poll         Poll        `json:"poll"`
+	Events       Events      `json:"events"`
+	Diagnostics  Diagnostics `json:"diagnostics"`
+	TLS          TLS         `json:"tls"`
 
 	// Parsed forms, filled in by Read and Validate.
 	Dir         string         `json:"-"` // directory of the config file; relative paths resolve against it
@@ -91,18 +98,20 @@ func (c *Config) Resolve(path string) string {
 
 // Defaults applied by ApplyDefaults to fields left empty or zero.
 const (
-	DefaultListen       = "127.0.0.1:8085"
-	DefaultPort         = "8085"
-	DefaultPerSecond    = 10
-	DefaultBurst        = 20
-	DefaultStateSeconds = 10
-	DefaultHeavySeconds = 60
-	DefaultLogFile      = "hvapi.log"
-	DefaultLogMaxMB     = 10
-	DefaultLogKeep      = 5
-	DefaultTLSMin       = "1.2"
-	DefaultEventHours   = 24
-	DefaultEventsPerLog = 500
+	DefaultListen           = "127.0.0.1:8085"
+	DefaultPort             = "8085"
+	DefaultPerSecond        = 10
+	DefaultBurst            = 20
+	DefaultStateSeconds     = 10
+	DefaultHeavySeconds     = 60
+	DefaultLogFile          = "hvapi.log"
+	DefaultLogMaxMB         = 10
+	DefaultLogKeep          = 5
+	DefaultTLSMin           = "1.2"
+	DefaultEventHours       = 24
+	DefaultEventsPerLog     = 500
+	DefaultCheckpointDays   = 7
+	DefaultFreeSpacePercent = 10
 )
 
 // Load reads, defaults and validates the config file at path.
@@ -164,6 +173,12 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Events.MaxPerLog <= 0 {
 		c.Events.MaxPerLog = DefaultEventsPerLog
+	}
+	if c.Diagnostics.CheckpointDays <= 0 {
+		c.Diagnostics.CheckpointDays = DefaultCheckpointDays
+	}
+	if c.Diagnostics.FreeSpacePercent <= 0 {
+		c.Diagnostics.FreeSpacePercent = DefaultFreeSpacePercent
 	}
 	if c.LogRotate.MaxMB <= 0 {
 		c.LogRotate.MaxMB = DefaultLogMaxMB

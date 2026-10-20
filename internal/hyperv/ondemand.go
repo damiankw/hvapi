@@ -20,9 +20,10 @@ import (
 // methods with short timeouts, and disk results are cached briefly so a
 // chatty client cannot keep the host busy.
 type OnDemand struct {
-	caller wmi.Caller
-	data   func() *Data
-	now    func() time.Time
+	caller  wmi.Caller
+	querier wmi.Querier
+	data    func() *Data
+	now     func() time.Time
 
 	mu    sync.Mutex
 	disks map[string]cachedDisk
@@ -45,9 +46,10 @@ const (
 	maxChain      = 64
 )
 
-// NewOnDemand wires a caller and the cache reader.
-func NewOnDemand(c wmi.Caller, data func() *Data) *OnDemand {
-	return &OnDemand{caller: c, data: data, now: time.Now, disks: map[string]cachedDisk{}}
+// NewOnDemand wires a caller (methods), a querier (raw class reads) and
+// the cache reader. Either client may be nil to disable that part.
+func NewOnDemand(c wmi.Caller, q wmi.Querier, data func() *Data) *OnDemand {
+	return &OnDemand{caller: c, querier: q, data: data, now: time.Now, disks: map[string]cachedDisk{}}
 }
 
 var diskTypes = map[string]string{"2": "Fixed", "3": "Dynamic", "4": "Differencing"}

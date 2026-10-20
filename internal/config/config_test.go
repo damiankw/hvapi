@@ -129,7 +129,7 @@ func TestFieldsCoverEveryJSONKey(t *testing.T) {
 			t.Errorf("%s has no meaning", f.Key)
 		}
 	}
-	for _, k := range []string{"listen", "api_keys", "allowed_cidrs", "rate_limit.per_second", "rate_limit.burst", "log_file", "log_rotate.max_mb", "log_rotate.keep", "poll.state_seconds", "poll.heavy_seconds", "events.hours", "events.max_per_log", "tls.cert_file", "tls.key_file", "tls.min_version"} {
+	for _, k := range []string{"listen", "api_keys", "allowed_cidrs", "rate_limit.per_second", "rate_limit.burst", "log_file", "log_rotate.max_mb", "log_rotate.keep", "poll.state_seconds", "poll.heavy_seconds", "events.hours", "events.max_per_log", "diagnostics.checkpoint_days", "diagnostics.free_space_percent", "tls.cert_file", "tls.key_file", "tls.min_version"} {
 		if Describe(k) == "" {
 			t.Errorf("%s is not documented", k)
 		}

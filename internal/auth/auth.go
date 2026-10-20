@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strings"
 	"sync"
 	"time"
 )
@@ -85,10 +86,23 @@ func (g *Guard) AllowIP(next http.Handler) http.Handler {
 	})
 }
 
+// KeyFromRequest returns the API key from X-API-Key or, failing that, from
+// "Authorization: Bearer <key>", which scrapers such as Prometheus can send
+// with their standard configuration.
+func KeyFromRequest(r *http.Request) string {
+	if k := r.Header.Get(HeaderName); k != "" {
+		return k
+	}
+	if a := r.Header.Get("Authorization"); len(a) > 7 && strings.EqualFold(a[:7], "Bearer ") {
+		return strings.TrimSpace(a[7:])
+	}
+	return ""
+}
+
 // RequireKey checks the API key, then applies the per-key rate limit.
 func (g *Guard) RequireKey(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id, ok := g.match(r.Header.Get(HeaderName))
+		id, ok := g.match(KeyFromRequest(r))
 		if !ok {
 			writeErr(w, http.StatusUnauthorized, "missing or invalid API key")
 			return

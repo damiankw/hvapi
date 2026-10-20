@@ -49,6 +49,7 @@ var tags = []openapi.Tag{
 	{Name: "host", Description: "The Hyper-V host itself: hardware, OS, services, storage, network, performance, cluster."},
 	{Name: "switches", Description: "Virtual switches and their ports."},
 	{Name: "activity", Description: "Jobs and event logs."},
+	{Name: "analysis", Description: "Diagnostics, Prometheus metrics and raw WMI access."},
 }
 
 // routes is the single source of truth: every entry is both registered on
@@ -57,7 +58,8 @@ func (s *state) routes() []route {
 	routes := append(s.serviceRoutes(), s.vmRoutes()...)
 	routes = append(routes, s.deepRoutes()...)
 	routes = append(routes, s.hostRoutes()...)
-	return append(routes, s.activityRoutes()...)
+	routes = append(routes, s.activityRoutes()...)
+	return append(routes, s.analysisRoutes()...)
 }
 
 func (s *state) serviceRoutes() []route {

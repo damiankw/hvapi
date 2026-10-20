@@ -2,6 +2,17 @@
 
 Notable changes to hvapi. The format follows [Keep a Changelog](https://keepachangelog.com/) and versions follow [Semantic Versioning](https://semver.org/). Each `## x.y.z` section becomes the release notes for that version.
 
+## 0.7.0 - 2026-10-20
+
+Analysis. This completes the planned feature set.
+
+### Added
+
+- `/diagnostics`: every rule in the README's table run over the cache, findings most severe first, `status` ok/warning/critical, thresholds from the new `diagnostics` config block (`checkpoint_days`, `free_space_percent`) with per-request overrides.
+- `/metrics`: Prometheus text format with VM state, CPU, memory, heartbeat, checkpoints and replication health; host CPU, memory, uptime and VM counts; services, volumes, jobs, events, cluster nodes; and the diagnostics status and finding counts.
+- `/wmi/classes` and `/wmi/{class}`: raw, read-only access to an allowlist of WMI classes.
+- The API key is also accepted as `Authorization: Bearer <key>`, so Prometheus can scrape with its standard configuration.
+
 ## 0.6.0 - 2026-10-20
 
 Activity and performance.

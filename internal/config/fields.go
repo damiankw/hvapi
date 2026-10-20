@@ -69,6 +69,16 @@ var Fields = []Field{
 		Default: "500",
 	},
 	{
+		Key:     "diagnostics.checkpoint_days",
+		Meaning: "A checkpoint older than this many days is reported by /diagnostics.",
+		Default: "7",
+	},
+	{
+		Key:     "diagnostics.free_space_percent",
+		Meaning: "A volume holding VM files with less free space than this percentage is reported by /diagnostics (critical at half of it).",
+		Default: "10",
+	},
+	{
 		Key:     "tls.cert_file",
 		Meaning: "PEM certificate (with any intermediates) to serve HTTPS. Set together with key_file. A relative path is next to config.json. 'hvapi gen-cert' creates a self-signed pair. Leave both empty for plain HTTP, which is only acceptable behind a reverse proxy or on an isolated management network.",
 	},

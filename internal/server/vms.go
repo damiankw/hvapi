@@ -14,10 +14,11 @@ import (
 // Status describes the poller. Both may be nil in tests, which makes every VM
 // endpoint report "not collected yet".
 type Deps struct {
-	Data       func() *hyperv.Data
-	Status     func() hyperv.Status
-	CertExpiry func() (time.Time, bool) // when serving TLS: the certificate's NotAfter
-	OnDemand   *hyperv.OnDemand         // disk state and thumbnails; nil disables them
+	Data        func() *hyperv.Data
+	Status      func() hyperv.Status
+	CertExpiry  func() (time.Time, bool) // when serving TLS: the certificate's NotAfter
+	OnDemand    *hyperv.OnDemand         // disk state, thumbnails and raw classes; nil disables them
+	Diagnostics AnalysisOptions          // thresholds for /diagnostics and /metrics
 }
 
 func (s *state) data() *hyperv.Data {

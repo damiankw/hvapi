@@ -25,6 +25,42 @@ func testConfig(burst int) *config.Config {
 	return cfg
 }
 
+func TestMetricsAndDiagnosticsRoutes(t *testing.T) {
+	cfg := testConfig(100)
+	p := hyperv.NewPoller(wmi.New(), nil, time.Second, time.Second)
+	p.PollOnce(context.Background())
+	srv := New(cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), Deps{Data: p.Data, Status: p.Status})
+	get := func(path string) (int, string, string) {
+		r := httptest.NewRequest("GET", path, nil)
+		r.RemoteAddr = "192.0.2.5:1"
+		r.Header.Set("Authorization", "Bearer secret")
+		w := httptest.NewRecorder()
+		srv.Handler.ServeHTTP(w, r)
+		return w.Code, w.Body.String(), w.Header().Get("Content-Type")
+	}
+	if code, body, ct := get("/metrics"); code != 200 || !strings.HasPrefix(ct, "text/plain; version=0.0.4") || !strings.Contains(body, `hvapi_info{version="`) || !strings.Contains(body, "hvapi_cache_ready 1") {
+		t.Errorf("/metrics = %d %s %s", code, ct, body)
+	}
+	if code, body, _ := get("/diagnostics?checkpoint_days=3"); code != 200 || !strings.Contains(body, `"checkpoint_days": 3`) || !strings.Contains(body, `"status"`) {
+		t.Errorf("/diagnostics = %d %s", code, body)
+	}
+	if code, body, _ := get("/wmi/classes"); code != 200 || !strings.Contains(body, "Msvm_ComputerSystem") {
+		t.Errorf("/wmi/classes = %d", code)
+	}
+	if code, _, _ := get("/wmi/Msvm_ComputerSystem"); code != 503 {
+		t.Errorf("/wmi/{class} without on-demand = %d", code)
+	}
+	if code, _, _ := get("/events?level=loud"); code != 400 {
+		t.Errorf("bad level = %d", code)
+	}
+	if code, _, _ := get("/events/nope"); code != 404 {
+		t.Errorf("unknown log = %d", code)
+	}
+	if code, _, _ := get("/jobs"); code != 200 {
+		t.Errorf("/jobs = %d", code)
+	}
+}
+
 func testServer(t *testing.T) *http.Server {
 	t.Helper()
 	return New(testConfig(2), slog.New(slog.NewJSONHandler(io.Discard, nil)), Deps{})
