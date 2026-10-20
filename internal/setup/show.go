@@ -1,12 +1,15 @@
 package setup
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/damiankw/hvapi/internal/config"
+	"github.com/damiankw/hvapi/internal/tlscert"
 )
 
 // Show prints the config at path with every setting explained, the defaults
@@ -81,10 +84,30 @@ func writeSummary(out io.Writer, cfgPath string, c *config.Config, raw *config.C
 	setting("poll.state_seconds", fmt.Sprint(c.Poll.StateSeconds)+mark(raw != nil && raw.Poll.StateSeconds <= 0))
 	setting("poll.heavy_seconds", fmt.Sprint(c.Poll.HeavySeconds)+mark(raw != nil && raw.Poll.HeavySeconds <= 0))
 
-	tlsVal := "(empty)"
-	if c.TLS.CertFile != "" || c.TLS.KeyFile != "" {
-		tlsVal = fmt.Sprintf("cert_file=%q key_file=%q", c.TLS.CertFile, c.TLS.KeyFile)
+	setting("log_rotate.max_mb", fmt.Sprint(c.LogRotate.MaxMB)+mark(raw != nil && raw.LogRotate.MaxMB <= 0))
+	setting("log_rotate.keep", fmt.Sprint(c.LogRotate.Keep)+mark(raw != nil && raw.LogRotate.Keep == 0))
+
+	if !c.TLSEnabled() {
+		fmt.Fprintf(out, "%-22s %s\n", "tls", "off: plain HTTP. Only acceptable behind a reverse proxy with TLS or on an isolated network.")
+		fmt.Fprintf(out, "%-22s %s\n", "", config.Describe("tls.cert_file"))
+		return
 	}
-	fmt.Fprintf(out, "%-22s %s\n", "tls", tlsVal)
+	fmt.Fprintf(out, "%-22s cert_file=%s key_file=%s min_version=%s\n", "tls", c.TLS.CertFile, c.TLS.KeyFile, c.TLS.MinVersion)
+	if c.TLSCertPath != "" {
+		if pair, err := tls.LoadX509KeyPair(c.TLSCertPath, c.TLSKeyPath); err == nil {
+			if info, err := tlscert.Describe(&pair); err == nil {
+				kind := "issued by " + info.Issuer
+				if info.SelfSigned {
+					kind = "self-signed (clients must trust it explicitly)"
+				}
+				days := int(time.Until(info.NotAfter).Hours() / 24)
+				fmt.Fprintf(out, "%-22s   %s\n", "", kind)
+				fmt.Fprintf(out, "%-22s   subject %s\n", "", info.Subject)
+				fmt.Fprintf(out, "%-22s   names   %s\n", "", strings.Join(append(append([]string{}, info.DNSNames...), info.IPAddresses...), ", "))
+				fmt.Fprintf(out, "%-22s   expires %s (%d days)\n", "", info.NotAfter.Format("2006-01-02"), days)
+				fmt.Fprintf(out, "%-22s   sha256  %s\n", "", info.Fingerprint)
+			}
+		}
+	}
 	fmt.Fprintf(out, "%-22s %s\n", "", config.Describe("tls.cert_file"))
 }

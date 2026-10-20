@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/damiankw/hvapi/internal/hyperv"
 	"github.com/damiankw/hvapi/internal/openapi"
@@ -12,8 +13,9 @@ import (
 // Status describes the poller. Both may be nil in tests, which makes every VM
 // endpoint report "not collected yet".
 type Deps struct {
-	Data   func() *hyperv.Data
-	Status func() hyperv.Status
+	Data       func() *hyperv.Data
+	Status     func() hyperv.Status
+	CertExpiry func() (time.Time, bool) // when serving TLS: the certificate's NotAfter
 }
 
 func (s *state) data() *hyperv.Data {

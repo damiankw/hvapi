@@ -15,7 +15,7 @@ import (
 
 // New returns a configured http.Server. It does not start listening.
 func New(cfg *config.Config, log *slog.Logger, deps Deps) *http.Server {
-	s := &state{started: time.Now(), deps: deps}
+	s := &state{started: time.Now(), deps: deps, tls: cfg.TLSEnabled()}
 	guard := auth.New(cfg.Prefixes, cfg.KeyIDs, cfg.KeyHash, cfg.RateLimit.PerSecond, cfg.RateLimit.Burst)
 
 	// Routes that need an API key, and routes that do not (/health, the docs).
@@ -34,7 +34,11 @@ func New(cfg *config.Config, log *slog.Logger, deps Deps) *http.Server {
 	open.Handle("/", guard.RequireKey(keyed))
 
 	// Every request: IP allowlist first, then logging around everything.
-	handler := logRequests(log, guard.AllowIP(readOnly(open)))
+	var handler http.Handler = guard.AllowIP(readOnly(open))
+	if cfg.TLSEnabled() {
+		handler = hsts(handler)
+	}
+	handler = logRequests(log, handler)
 
 	return &http.Server{
 		Addr:              cfg.Listen,
@@ -51,6 +55,14 @@ func New(cfg *config.Config, log *slog.Logger, deps Deps) *http.Server {
 // Spec returns the OpenAPI document for this build as indented JSON.
 func Spec() []byte {
 	return (&state{}).spec()
+}
+
+// hsts tells browsers (the /docs page) to stay on HTTPS.
+func hsts(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // readOnly rejects any method other than GET and HEAD before routing.

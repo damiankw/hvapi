@@ -39,22 +39,37 @@ var Fields = []Field{
 		Default: DefaultLogFile,
 	},
 	{
+		Key:     "log_rotate.max_mb",
+		Meaning: "Size in megabytes at which the log file is rotated (renamed with a numeric suffix and started afresh), so it can never grow without limit.",
+		Default: "10",
+	},
+	{
+		Key:     "log_rotate.keep",
+		Meaning: "How many rotated log files to keep. Older ones are deleted.",
+		Default: "5",
+	},
+	{
 		Key:     "poll.state_seconds",
-		Meaning: "Seconds between refreshes of fast-changing data such as VM state (used from phase 2).",
+		Meaning: "Seconds between refreshes of fast-changing data such as VM state .",
 		Default: "10",
 	},
 	{
 		Key:     "poll.heavy_seconds",
-		Meaning: "Seconds between refreshes of slower data such as VM configuration and disks (used from phase 2).",
+		Meaning: "Seconds between refreshes of slower data such as VM configuration and disks .",
 		Default: "60",
 	},
 	{
 		Key:     "tls.cert_file",
-		Meaning: "Reserved for HTTPS, which is not implemented yet. Must be empty.",
+		Meaning: "PEM certificate (with any intermediates) to serve HTTPS. Set together with key_file. A relative path is next to config.json. 'hvapi gen-cert' creates a self-signed pair. Leave both empty for plain HTTP, which is only acceptable behind a reverse proxy or on an isolated management network.",
 	},
 	{
 		Key:     "tls.key_file",
-		Meaning: "Reserved for HTTPS, which is not implemented yet. Must be empty.",
+		Meaning: "PEM private key matching cert_file. Changes to both files are picked up without a restart.",
+	},
+	{
+		Key:     "tls.min_version",
+		Meaning: "Lowest TLS version accepted: \"1.2\" (default) or \"1.3\".",
+		Default: "1.2",
 	},
 }
 

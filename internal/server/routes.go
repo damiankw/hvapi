@@ -14,9 +14,11 @@ import (
 // documentation, so keep them meaningful.
 
 type Health struct {
-	Status        string    `json:"status" doc:"Always \"ok\" when the service is up."`
-	StartedAt     time.Time `json:"started_at" doc:"When the service started, UTC."`
-	UptimeSeconds int64     `json:"uptime_seconds" doc:"Seconds since the service started."`
+	Status        string     `json:"status" doc:"Always \"ok\" when the service is up."`
+	StartedAt     time.Time  `json:"started_at" doc:"When the service started, UTC."`
+	UptimeSeconds int64      `json:"uptime_seconds" doc:"Seconds since the service started."`
+	TLS           bool       `json:"tls" doc:"True when this listener serves HTTPS."`
+	TLSExpires    *time.Time `json:"tls_expires,omitempty" doc:"When the served certificate expires, UTC. Renew before then; the new files are picked up without a restart."`
 }
 
 type Version struct {
@@ -35,6 +37,7 @@ type route struct {
 // state is what handlers close over.
 type state struct {
 	started  time.Time
+	tls      bool
 	deps     Deps
 	specOnce sync.Once
 	specJSON []byte
@@ -62,11 +65,19 @@ func (s *state) serviceRoutes() []route {
 				Response:    Health{},
 			},
 			handler: func(w http.ResponseWriter, r *http.Request) {
-				writeJSON(w, http.StatusOK, Health{
+				h := Health{
 					Status:        "ok",
 					StartedAt:     s.started.UTC(),
 					UptimeSeconds: int64(time.Since(s.started).Seconds()),
-				})
+					TLS:           s.tls,
+				}
+				if s.deps.CertExpiry != nil {
+					if t, ok := s.deps.CertExpiry(); ok {
+						t = t.UTC()
+						h.TLSExpires = &t
+					}
+				}
+				writeJSON(w, http.StatusOK, h)
 			},
 		},
 		{

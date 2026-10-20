@@ -4,10 +4,23 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 
 - One self-contained `hvapi.exe`, nothing to install on the host
 - Read-only by design: only `GET` requests, no VM changes of any kind
-- API key and IP allowlist on every request
+- HTTPS built in, API key and IP allowlist on every request
 - Documents itself: Swagger UI at `/docs`, OpenAPI at `/openapi.json`
 
-> **Status:** 0.2.x covers VM inventory, summary, configuration, processor, memory, disks and network. Host, switch, checkpoint, event and performance endpoints are planned; the roadmap is in `CLAUDE.md`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+> **Status:** 0.3.x covers VM inventory, summary, configuration, processor, memory, disks and network, served over HTTPS. Host, switch, checkpoint, event and performance endpoints are planned; the roadmap is in `CLAUDE.md`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+## Secure the connection first
+
+hvapi hands out everything about your virtual machines to anyone with an API key, and the key itself travels in a request header. **Over plain HTTP both are visible to anyone on the path.** Treat the choice below as part of the install, not an afterthought:
+
+| Setup | When it fits | How |
+| --- | --- | --- |
+| **Built-in HTTPS with a certificate from your CA** (recommended) | Any network, including reaching the host from outside the management segment | Put the PEM certificate and key in `config.json` under `tls`. hvapi reloads them when they change, so renewals need no restart. |
+| **Built-in HTTPS with a self-signed certificate** | A handful of clients you control | `hvapi configure` offers to generate one, or run `hvapi gen-cert`. Each client must trust the certificate (see [Trusting a self-signed certificate](#trusting-a-self-signed-certificate)). |
+| **Reverse proxy that terminates TLS** (IIS with ARR, nginx, Caddy, Traefik) | You already run one, or want central certificate handling | Bind hvapi to `127.0.0.1`, put the proxy's address in `allowed_cidrs`, and let the proxy enforce client access. hvapi then logs the proxy's address as the caller, not the client's. |
+| **Plain HTTP** | Only on an isolated management network that nothing untrusted can reach | Leave `tls` empty. hvapi warns in the log at every start. |
+
+In every case, keep the Windows Firewall rule limited to the addresses that need access. The firewall and `allowed_cidrs` decide who can connect; TLS decides whether anyone in between can read it.
 
 ## Requirements
 
@@ -24,7 +37,7 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
    ```
 
 2. Unpack it into a folder on the Hyper-V host, for example `C:\Program Files\hvapi\`.
-3. Create `config.json` with the guided setup. It explains every setting, suggests values, and can generate the API key for you:
+3. Create `config.json` with the guided setup. It explains every setting, suggests values, can generate the API key, and sets up HTTPS (your own certificate or a self-signed one):
 
    ```powershell
    .\hvapi.exe configure
@@ -45,8 +58,9 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
    | `allowed_cidrs` | Address ranges or single IPs allowed to connect. |
    | `rate_limit` | Requests per second and burst size, per key. |
    | `log_file` | Log path. Relative paths sit next to `config.json`. |
+   | `log_rotate` | `max_mb` at which the log is rotated and `keep`, the number of old logs retained, so the log never grows without limit. |
    | `poll` | How often the cache is refreshed: `state_seconds` for VM state and load, `heavy_seconds` for configuration. |
-   | `tls` | Reserved for HTTPS later. Leave empty. |
+   | `tls` | `cert_file` and `key_file` (PEM, relative to `config.json`) turn on HTTPS; `min_version` is `1.2` or `1.3`. Empty means plain HTTP. |
 
 5. Test it from an **elevated** console (Run as administrator), because reading Hyper-V data needs it:
 
@@ -63,7 +77,7 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
    sc.exe start hvapi
    ```
 
-7. Open the port in Windows Firewall for your monitoring hosts only:
+7. Open the port in Windows Firewall for your monitoring hosts only. This and `allowed_cidrs` are your access control; TLS is your confidentiality:
 
    ```powershell
    New-NetFirewallRule -DisplayName "hvapi" -Direction Inbound -Protocol TCP `
@@ -105,13 +119,15 @@ Both need no API key, but the IP allowlist applies. The document is generated fr
 ## Calling the API
 
 ```powershell
-Invoke-RestMethod http://10.0.0.10:8085/health
-Invoke-RestMethod http://10.0.0.10:8085/version -Headers @{ "X-API-Key" = "<your key>" }
+Invoke-RestMethod https://10.0.0.10:8085/health
+Invoke-RestMethod https://10.0.0.10:8085/version -Headers @{ "X-API-Key" = "<your key>" }
 ```
 
 ```bash
-curl -H "X-API-Key: <your key>" http://10.0.0.10:8085/version
+curl -H "X-API-Key: <your key>" https://10.0.0.10:8085/version
 ```
+
+`/health` reports `tls` and `tls_expires`, so a monitor can warn before the certificate runs out.
 
 | Code | Meaning |
 | --- | --- |
@@ -134,6 +150,23 @@ The account needs to read Hyper-V data: membership of **Hyper-V Administrators**
 
 **Empty `/vms` or notes everywhere.** Open `/status`. Its `warnings` say when the start-up check failed, and each source shows its row count and error. "Access denied" means the account cannot read Hyper-V WMI: use an elevated prompt for `run`, or for the service put its account in Hyper-V Administrators. "Namespace not found" means the Hyper-V role is not installed.
 
+**Trusting a self-signed certificate.** <a id="trusting-a-self-signed-certificate"></a> Copy `hvapi-cert.pem` from the host to each client. On Windows, import it into the machine's trusted roots from an elevated prompt:
+
+   ```powershell
+   Import-Certificate -FilePath .\hvapi-cert.pem -CertStoreLocation Cert:\LocalMachine\Root
+   ```
+
+   With curl use `--cacert hvapi-cert.pem`; with PowerShell 7 you can also pass `-SkipCertificateCheck` for a quick test, but not for monitoring, since that disables the protection. `hvapi show-config` prints the certificate's SHA-256 fingerprint for comparison. The certificate must list the name or IP you connect with; regenerate with `hvapi gen-cert -san <names>` if it does not.
+
+**Using a certificate from your CA.** hvapi reads PEM files. If you have a `.pfx`, split it with OpenSSL (included with Git for Windows):
+
+   ```powershell
+   openssl pkcs12 -in hvapi.pfx -clcerts -nokeys -out hvapi-cert.pem
+   openssl pkcs12 -in hvapi.pfx -nocerts -nodes -out hvapi-key.pem
+   ```
+
+   Include intermediates in `hvapi-cert.pem` after the server certificate. Protect the key file: only the service account needs to read it. When you renew, overwrite the two files and hvapi picks them up within 30 seconds.
+
 **Checking what a host exposes.** `/status` should show `rows` greater than zero and no `error` for every source; `dynamic_memory_counters` may legitimately be missing on some hosts. For anything that looks wrong, query the class directly and share the output:
 
    ```powershell
@@ -149,6 +182,7 @@ The account needs to read Hyper-V data: membership of **Hyper-V Administrators**
 hvapi run [-config path]          Run in the console (Ctrl+C to stop)
 hvapi configure [-config path]    Build or edit config.json with a guided walk-through
 hvapi show-config [-config path]  Print the config with every setting explained
+hvapi gen-cert [options]          Generate a self-signed certificate for HTTPS
 hvapi hash-key                    Generate a new API key and its hash
 hvapi install [-config path]      Install as a Windows service
 hvapi uninstall                   Stop and remove the service
@@ -158,7 +192,7 @@ hvapi version                     Print build information
 hvapi help [command]              Show help, or details of one command
 ```
 
-`configure`, `show-config`, `hash-key` and `openapi` also run on Linux and macOS, so a config can be prepared on a workstation and copied to the host.
+`configure`, `show-config`, `gen-cert`, `hash-key` and `openapi` also run on Linux and macOS, so a config can be prepared on a workstation and copied to the host.
 
 ## Building and releasing
 

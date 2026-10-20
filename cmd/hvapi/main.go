@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -24,9 +25,11 @@ import (
 	"github.com/damiankw/hvapi/internal/auth"
 	"github.com/damiankw/hvapi/internal/config"
 	"github.com/damiankw/hvapi/internal/hyperv"
+	"github.com/damiankw/hvapi/internal/logfile"
 	"github.com/damiankw/hvapi/internal/server"
 	"github.com/damiankw/hvapi/internal/service"
 	"github.com/damiankw/hvapi/internal/setup"
+	"github.com/damiankw/hvapi/internal/tlscert"
 	"github.com/damiankw/hvapi/internal/version"
 	"github.com/damiankw/hvapi/internal/wmi"
 )
@@ -84,6 +87,23 @@ whether a default applies, and what the setting does. Key hashes are
 shortened. Problems are listed if the file would not pass validation, and
 the exit code is 1 in that case, so it doubles as a config check.`,
 			run: cmdShowConfig,
+		},
+		{
+			name: "gen-cert", args: "[-out dir] [-name host] [-san list] [-days n] [-force]",
+			short: "Generate a self-signed certificate for HTTPS",
+			long: `Writes hvapi-cert.pem and hvapi-key.pem (ECDSA P-256, self-signed) to the
+output directory, which defaults to the folder of hvapi.exe. The certificate
+is valid for this machine's host name, its IP addresses and localhost; add
+more names with -san (comma separated DNS names or IPs). Put the two paths in
+config.json under tls, or let 'hvapi configure' do all of this for you.
+
+Clients must trust a self-signed certificate explicitly: import
+hvapi-cert.pem into their trusted root store, or pin its fingerprint. For
+anything beyond a few clients, a certificate from your CA is simpler.
+
+  hvapi gen-cert
+  hvapi gen-cert -name hv01.example.local -san hv01,10.0.0.10 -days 730`,
+			run: cmdGenCert,
 		},
 		{
 			name:  "hash-key",
@@ -194,6 +214,38 @@ func cmdConfigure(args []string, in io.Reader, out io.Writer) error {
 
 func cmdShowConfig(args []string, _ io.Reader, out io.Writer) error {
 	return setup.Show(out, parseConfigFlag("show-config", args))
+}
+
+func cmdGenCert(args []string, _ io.Reader, out io.Writer) error {
+	fs := flag.NewFlagSet("gen-cert", flag.ExitOnError)
+	dir := fs.String("out", filepath.Dir(defaultConfigPath()), "directory to write the files to")
+	name := fs.String("name", "", "common name (default: this machine's host name)")
+	san := fs.String("san", "", "extra subject alternative names, comma separated (DNS names or IPs)")
+	days := fs.Int("days", 3650, "validity in days")
+	force := fs.Bool("force", false, "replace existing files")
+	_ = fs.Parse(args)
+
+	dns, ips := tlscert.DefaultSANs(setup.LocalIPs())
+	extraDNS, extraIPs := tlscert.ParseSANs(*san)
+	dns = append(dns, extraDNS...)
+	ips = append(ips, extraIPs...)
+	cn := *name
+	if cn == "" {
+		cn = dns[0]
+	} else {
+		dns = append([]string{cn}, dns...)
+	}
+	certFile, keyFile := filepath.Join(*dir, "hvapi-cert.pem"), filepath.Join(*dir, "hvapi-key.pem")
+	info, err := tlscert.WriteFiles(certFile, keyFile, tlscert.Options{CommonName: cn, DNSNames: dns, IPs: ips, Validity: time.Duration(*days) * 24 * time.Hour}, *force)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Wrote %s\nWrote %s (keep this private)\n\n", certFile, keyFile)
+	fmt.Fprintf(out, "Subject:     %s\nValid for:   %s\nExpires:     %s\nFingerprint: %s\n\n",
+		info.Subject, strings.Join(append(append([]string{}, info.DNSNames...), info.IPAddresses...), ", "),
+		info.NotAfter.Format("2006-01-02"), info.Fingerprint)
+	fmt.Fprintf(out, "Add to config.json:\n  \"tls\": { \"cert_file\": %q, \"key_file\": %q }\n", filepath.Base(certFile), filepath.Base(keyFile))
+	return nil
 }
 
 func cmdHashKey(_ []string, _ io.Reader, out io.Writer) error {
@@ -309,7 +361,7 @@ Getting started:
 
 'hvapi help <command>' explains one command. The config file defaults to
 config.json next to hvapi.exe. Once running, the API documentation is at
-http://<listen address>/docs.
+https://<listen address>/docs (http:// when tls is not configured).
 `)
 }
 
@@ -363,10 +415,38 @@ func serve(ctx context.Context, cfgPath string, asService, force bool) error {
 	defer stopPoll()
 	go poller.Run(pollCtx)
 
-	srv := server.New(cfg, log, server.Deps{Data: poller.Data, Status: poller.Status})
+	deps := server.Deps{Data: poller.Data, Status: poller.Status}
+	var reloader *tlscert.Reloader
+	if cfg.TLSEnabled() {
+		reloader, err = tlscert.NewReloader(cfg.TLSCertPath, cfg.TLSKeyPath)
+		if err != nil {
+			return fmt.Errorf("tls: %w", err)
+		}
+		deps.CertExpiry = func() (time.Time, bool) {
+			if c := reloader.Current(); c != nil && c.Leaf != nil {
+				return c.Leaf.NotAfter, true
+			}
+			return time.Time{}, false
+		}
+		if info, err := tlscert.Describe(reloader.Current()); err == nil {
+			log.Info("tls enabled", "subject", info.Subject, "expires", info.NotAfter.Format(time.RFC3339), "self_signed", info.SelfSigned, "min_version", cfg.TLS.MinVersion)
+			if left := time.Until(info.NotAfter); left < 30*24*time.Hour {
+				log.Warn("tls certificate expires soon; replace the files and hvapi will pick them up", "expires", info.NotAfter.Format(time.RFC3339))
+			}
+		}
+	} else {
+		log.Warn("serving plain HTTP: API keys and data cross the network unencrypted. Configure tls, or put hvapi behind a reverse proxy that terminates TLS.")
+	}
+
+	srv := server.New(cfg, log, deps)
 	errCh := make(chan error, 1)
-	go func() { errCh <- srv.ListenAndServe() }()
-	log.Info("hvapi started", "version", version.Version, "listen", cfg.Listen, "keys", len(cfg.KeyIDs), "docs", "http://"+cfg.Listen+"/docs")
+	if reloader != nil {
+		srv.TLSConfig = &tls.Config{MinVersion: cfg.TLSMinVersion(), GetCertificate: reloader.GetCertificate}
+		go func() { errCh <- srv.ListenAndServeTLS("", "") }()
+	} else {
+		go func() { errCh <- srv.ListenAndServe() }()
+	}
+	log.Info("hvapi started", "version", version.Version, "listen", cfg.Listen, "scheme", cfg.Scheme(), "keys", len(cfg.KeyIDs), "docs", cfg.Scheme()+"://"+cfg.Listen+"/docs")
 
 	select {
 	case err := <-errCh:
@@ -396,7 +476,7 @@ func newLogger(cfg *config.Config, cfgPath string, asService bool) (*slog.Logger
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(filepath.Dir(cfgPath), path)
 		}
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+		f, err := logfile.Open(path, int64(cfg.LogRotate.MaxMB)<<20, cfg.LogRotate.Keep)
 		if err != nil {
 			return nil, nil, fmt.Errorf("open log file: %w", err)
 		}

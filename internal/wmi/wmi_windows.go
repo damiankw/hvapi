@@ -17,10 +17,32 @@ import (
 // (WbemScripting.SWbemLocator) over COM. Each call runs on its own
 // OS-thread-locked goroutine with its own COM apartment, which keeps COM
 // rules simple and lets a caller time out without holding anything.
-type Client struct{}
+//
+// A call that times out keeps its thread until WMI answers. If WMI is hung,
+// those threads would pile up poll after poll, so the number of calls in
+// flight is capped; beyond the cap, calls fail fast with ErrBusy.
+type Client struct {
+	slots chan struct{}
+}
+
+// MaxInFlight is the most WMI calls (including stranded ones) at one time.
+const MaxInFlight = 8
+
+// ErrBusy is returned when MaxInFlight calls are already waiting on WMI.
+var ErrBusy = errors.New("too many WMI calls in flight; WMI may be hung or very slow")
 
 // New returns a Client for the local host.
-func New() *Client { return &Client{} }
+func New() *Client { return &Client{slots: make(chan struct{}, MaxInFlight)} }
+
+// acquire takes a slot or fails fast.
+func (c *Client) acquire() (release func(), err error) {
+	select {
+	case c.slots <- struct{}{}:
+		return func() { <-c.slots }, nil
+	default:
+		return nil, ErrBusy
+	}
+}
 
 const (
 	wbemFlagReturnImmediately = 0x10
@@ -38,12 +60,17 @@ func (c *Client) Query(ctx context.Context, namespace, wql string) ([]Row, error
 	if err := CheckQuery(wql); err != nil {
 		return nil, err
 	}
+	release, err := c.acquire()
+	if err != nil {
+		return nil, fmt.Errorf("wmi query %q: %w", wql, err)
+	}
 	type result struct {
 		rows []Row
 		err  error
 	}
 	ch := make(chan result, 1)
 	go func() {
+		defer release()
 		rows, err := execQuery(namespace, wql)
 		ch <- result{rows, err}
 	}()
@@ -64,12 +91,17 @@ func (c *Client) Call(ctx context.Context, namespace, objectPath, method string,
 	if err := CheckMethod(method); err != nil {
 		return nil, err
 	}
+	release, err := c.acquire()
+	if err != nil {
+		return nil, fmt.Errorf("wmi method %s: %w", method, err)
+	}
 	type result struct {
 		row Row
 		err error
 	}
 	ch := make(chan result, 1)
 	go func() {
+		defer release()
 		row, err := execMethod(namespace, objectPath, method, in)
 		ch <- result{row, err}
 	}()

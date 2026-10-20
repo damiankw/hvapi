@@ -2,6 +2,22 @@
 
 Notable changes to hvapi. The format follows [Keep a Changelog](https://keepachangelog.com/) and versions follow [Semantic Versioning](https://semver.org/). Each `## x.y.z` section becomes the release notes for that version.
 
+## 0.3.0 - 2026-10-20
+
+Security release: hvapi can now serve HTTPS itself, for installations that cannot put a reverse proxy in front of it.
+
+### Added
+
+- Built-in HTTPS. Set `tls.cert_file` and `tls.key_file` (PEM) in `config.json`; `tls.min_version` chooses 1.2 (default) or 1.3. Certificate and key are reloaded when the files change, so renewals need no restart. A `Strict-Transport-Security` header is sent over HTTPS.
+- `hvapi gen-cert` generates a self-signed certificate for the host's name and addresses. `hvapi configure` has an HTTPS step that uses an existing certificate, generates one, or (with a warning) keeps plain HTTP.
+- `hvapi show-config` shows the certificate's subject, names, expiry and fingerprint. `/health` reports `tls` and `tls_expires`.
+- Log rotation: `log_rotate.max_mb` (default 10) and `log_rotate.keep` (default 5) bound the log file's size.
+- A cap on WMI calls in flight, so a hung WMI service cannot accumulate threads poll after poll.
+
+### Changed
+
+- Starting without TLS logs a warning. The README now leads with how to secure the connection.
+
 ## 0.2.0 - 2026-10-20
 
 First release. Covers phases 1 (foundation) and 2 (core VM data) of the plan.

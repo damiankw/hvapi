@@ -12,7 +12,8 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 - **Read-only, strictly:** GET only. No start, stop, create or change of any kind, ever. The WMI layer may call only `ExecQuery` plus an explicit allowlist of read-only methods (`GetSummaryInformation`, `GetVirtualHardDiskSettingData`, `GetVirtualHardDiskState`, `GetVirtualSystemThumbnailImage`).
 - **Data sources:** WMI (`root\virtualization\v2`, `root\cimv2`, `root\Microsoft\Windows\Storage`, `root\StandardCimv2`, `root\MSCluster`), performance counters (via `Win32_PerfFormattedData_*`), and Windows event logs via `wevtapi` (`EvtQuery`). Never spawn PowerShell per request. WMIC is removed from Windows, but WMI itself is fully supported.
 - **Architecture:** a background poller fills an in-memory cache; handlers serve from the cache. Only the thumbnail and VHD state calls run on demand, with short timeouts.
-- **Security:** plain HTTP for now (internal only, HTTPS deliberately deferred; config reserves a `tls` block). API key in the `X-API-Key` header, stored as SHA-256 hashes, constant-time compare. IP allowlist in the app and Windows Firewall. Per-key rate limit. Requests logged with key ID, never the key.
+- **Security:** HTTPS built in (phase 3): `tls.cert_file` and `tls.key_file` (PEM, relative to the config) enable it; `internal/tlscert` reloads the files when their mtime changes (checked at most every 30 s, bad replacements ignored) and generates self-signed ECDSA P-256 certificates (`hvapi gen-cert`, and the `configure` wizard). Minimum TLS 1.2, HSTS header when serving TLS, `/health` reports `tls` and `tls_expires`. Plain HTTP still allowed but warned about at start; the README tells users to use TLS or a reverse proxy. No PKCS#12 support (would need a dependency); the README shows the OpenSSL conversion. API key in the `X-API-Key` header, stored as SHA-256 hashes, constant-time compare. IP allowlist in the app and Windows Firewall. Per-key rate limit. Requests logged with key ID, never the key. No `X-Forwarded-For` handling: behind a proxy the proxy's address is the caller.
+- **Resource bounds:** the log file rotates by size (`internal/logfile`, `log_rotate.max_mb` and `keep`); the cache is replaced each poll, never appended; WMI calls in flight are capped at `wmi.MaxInFlight` (8) so a hung WMI cannot strand unbounded threads, further calls fail fast with `wmi.ErrBusy`.
 - **Missing data:** if a class doesn't exist on a host (older OS, no cluster), return an empty result with a note; never fail the whole request.
 - **API documentation:** generated, not hand-written. `internal/server/routes.go` is a route table; each entry both registers the handler and describes the operation. `internal/openapi` turns the table and the Go response types (with `json` and `doc` struct tags) into an OpenAPI 3.0 document. It is served at `/openapi.json` (no key), rendered by Swagger UI at `/docs` (CDN-loaded, pinned version), printed by `hvapi openapi`, and attached to CI artifacts and releases. A test fails if a route is missing from the document. Every new endpoint must be added to the table with a summary, description and a typed response.
 - **CLI:** `cmd/hvapi/main.go` builds on every OS; the service package has non-Windows stubs. Commands live in one table (`commands()`), which also drives `hvapi help`. `configure` (guided setup) and `show-config` (annotated dump) are in `internal/setup`; their explanations come from `config.Fields`, the single list of setting descriptions.
@@ -27,16 +28,21 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 
 **Phase 1 (foundation) is done:** config loading and validation, API key, IP allowlist, rate limit, JSON logging, Windows service install/uninstall/run, `hash-key`, `configure`, `show-config`, `help` and `openapi` commands, `/health` (no key), `/version`, `/openapi.json` and `/docs`. Tests sit next to each package.
 
+**Phase 3 (security) is done (v0.3.0):** built-in HTTPS with certificate reload, `gen-cert`, HTTPS step in `configure`, certificate details in `show-config`, `tls`/`tls_expires` in `/health`, HSTS, log rotation, WMI in-flight cap.
+
 **Phase 2 (core VM data) is done and confirmed on a real Hyper-V host** (`/status` and `/vms/summary` verified by the owner): read-only WMI client with query and method allowlists, cache and two-interval poller, start-up preflight (refuses an unelevated console when WMI denies access; `run -force` overrides; warnings in `/status`), `/status`, `/vms`, `/vms/summary`, `/vms/{id}` and its `summary`, `config`, `processor`, `memory`, `disks`, `network`, plus the `hvapi wmi` command. Tests use recorded-style fixtures (`internal/hyperv/fixtures_test.go`). Released as **v0.2.0**. Items still worth confirming from a host's `/status` output when convenient: the dynamic memory counter class name, the InstanceID layout of snapshot settings (only matters for the fallback linking path), and whether `Msvm_EthernetSwitchPortVlanSettingData` InstanceIDs start with the connection's InstanceID.
 
-## Build phases
+## Build phases and versions
 
-1. Foundation: done.
+Each phase ships as a minor version: phase N is released as v0.N.0, with patch releases (v0.N.1 ...) for fixes in between. Every release needs its `CHANGELOG.md` section.
+
+1. Foundation: done (part of v0.2.0).
 2. Core VM data: done (v0.2.0).
-3. Host and networking: all `/host/*` endpoints and `/switches/*`.
-4. Deep VM detail: `integration`, `kvp`, `checkpoints`, `disks/{diskId}/state`, `replication`, `devices`, `security`, `metering`, `thumbnail`.
-5. Activity and performance: `/jobs`, `/events`, `/events/{log}`, host and VM `/perf`.
-6. Analysis: `/diagnostics`, `/metrics` (Prometheus), raw `/wmi/classes` and `/wmi/{class}`. (API reference is generated; see the API documentation decision above.)
+3. Security: done (v0.3.0). Built-in TLS, certificate generation and reload, log rotation, WMI call cap.
+4. Host and networking (v0.4.0): all `/host/*` endpoints and `/switches/*`.
+5. Deep VM detail (v0.5.0): `integration`, `kvp`, `checkpoints`, `disks/{diskId}/state`, `replication`, `devices`, `security`, `metering`, `thumbnail`.
+6. Activity and performance (v0.6.0): `/jobs`, `/events`, `/events/{log}`, host and VM `/perf`.
+7. Analysis (v0.7.0): `/diagnostics`, `/metrics` (Prometheus), raw `/wmi/classes` and `/wmi/{class}`. (API reference is generated; see the API documentation decision above.)
 
 ## Endpoint plan and data sources
 

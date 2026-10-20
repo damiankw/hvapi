@@ -14,6 +14,7 @@ import (
 
 	"github.com/damiankw/hvapi/internal/auth"
 	"github.com/damiankw/hvapi/internal/config"
+	"github.com/damiankw/hvapi/internal/tlscert"
 )
 
 // localIPs lists candidate listen addresses. Tests replace it.
@@ -37,6 +38,9 @@ var localIPs = func() []string {
 	return out
 }
 
+// LocalIPs lists this machine's non-loopback IPv4 addresses.
+func LocalIPs() []string { return localIPs() }
+
 // Configure walks the user through every setting and writes config.json to
 // path. An existing file at path supplies the defaults, so it also edits.
 func Configure(in io.Reader, out io.Writer, path string) error {
@@ -54,6 +58,7 @@ func Configure(in io.Reader, out io.Writer, path string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		p.say("Note: the existing file could not be read and will be replaced: %v\n\n", err)
 	}
+	cfg.Dir = filepath.Dir(abs) // relative paths (log, certificate) resolve against the config's folder
 	cfg.ApplyDefaults()
 
 	p.say("hvapi configuration\n")
@@ -223,9 +228,93 @@ func Configure(in io.Reader, out io.Writer, path string) error {
 	}
 	p.say("\n")
 
-	// 7. TLS.
-	p.say("7. TLS\n   %s Left empty.\n\n", config.Describe("tls.cert_file"))
-	cfg.TLS = config.TLS{}
+	// 7. HTTPS.
+	p.say("7. HTTPS\n")
+	p.say("   Without HTTPS, API keys and all data cross the network in clear text.\n")
+	p.say("   Use HTTPS unless hvapi sits behind a reverse proxy that terminates TLS,\n")
+	p.say("   or the network is an isolated management segment.\n")
+	p.say("     1  Use an existing PEM certificate and key (from your CA)\n")
+	p.say("     2  Generate a self-signed certificate now (clients must trust it)\n")
+	p.say("     3  Plain HTTP (reverse proxy or isolated network only)\n")
+	tlsDef := "2"
+	if cfg.TLSEnabled() {
+		tlsDef = "1"
+	}
+	choice, err := p.askValid("   Choose 1, 2 or 3", tlsDef, func(s string) error {
+		if s != "1" && s != "2" && s != "3" {
+			return errors.New("enter 1, 2 or 3")
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	genCert := false
+	switch choice {
+	case "1":
+		cfg.TLS.CertFile, err = p.askValid("   Certificate file (PEM, may include intermediates)", cfg.TLS.CertFile, func(s string) error {
+			if _, err := os.Stat(cfg.Resolve(s)); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		cfg.TLS.KeyFile, err = p.askValid("   Private key file (PEM)", cfg.TLS.KeyFile, func(s string) error {
+			if _, err := os.Stat(cfg.Resolve(s)); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	case "2":
+		genCert = true
+		if cfg.TLS.CertFile == "" {
+			cfg.TLS.CertFile = "hvapi-cert.pem"
+		}
+		if cfg.TLS.KeyFile == "" {
+			cfg.TLS.KeyFile = "hvapi-key.pem"
+		}
+		p.say("   The certificate will be written next to the config as %s and %s.\n", cfg.TLS.CertFile, cfg.TLS.KeyFile)
+	case "3":
+		cfg.TLS = config.TLS{}
+		p.say("   Warning: plain HTTP. Put hvapi behind a reverse proxy with TLS, or bind it to an isolated network.\n")
+	}
+	if cfg.TLSEnabled() {
+		cfg.TLS.MinVersion, err = p.askValid("   Minimum TLS version (1.2 or 1.3)", valueOr(cfg.TLS.MinVersion, config.DefaultTLSMin), func(s string) error {
+			if s != "1.2" && s != "1.3" {
+				return errors.New("enter 1.2 or 1.3")
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	p.say("\n")
+
+	if genCert {
+		certPath, keyPath := cfg.Resolve(cfg.TLS.CertFile), cfg.Resolve(cfg.TLS.KeyFile)
+		overwrite := true
+		if _, err := os.Stat(certPath); err == nil {
+			if overwrite, err = p.askYesNo(fmt.Sprintf("   %s exists. Replace it with a new certificate?", certPath), false); err != nil {
+				return err
+			}
+		}
+		if overwrite {
+			host, _, _ := net.SplitHostPort(cfg.Listen)
+			dns, ips := tlscert.DefaultSANs(append(localIPs(), host))
+			info, err := tlscert.WriteFiles(certPath, keyPath, tlscert.Options{CommonName: dns[0], DNSNames: dns, IPs: ips}, true)
+			if err != nil {
+				return fmt.Errorf("generate certificate: %w", err)
+			}
+			p.say("   Generated a self-signed certificate for %s, valid until %s.\n   SHA-256 fingerprint: %s\n\n",
+				strings.Join(append(dns, info.IPAddresses...), ", "), info.NotAfter.Format("2006-01-02"), info.Fingerprint)
+		}
+	}
 
 	// Validate, show and write.
 	if err := cfg.Validate(); err != nil {
@@ -255,6 +344,9 @@ func Configure(in io.Reader, out io.Writer, path string) error {
 		}
 	}
 	p.say("\nNext steps:\n  hvapi run -config %q      test in this console\n  hvapi install -config %q  install as a service\n", abs, abs)
+	if cfg.TLSEnabled() {
+		p.say("  Clients connect with https://%s/ and must trust the certificate.\n", cfg.Listen)
+	}
 	return nil
 }
 
@@ -265,6 +357,13 @@ func Save(path string, cfg *config.Config) error {
 		return err
 	}
 	return os.WriteFile(path, append(raw, '\n'), 0o640)
+}
+
+func valueOr(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
 }
 
 func splitList(s string) []string {

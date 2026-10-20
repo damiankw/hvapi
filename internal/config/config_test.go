@@ -1,10 +1,13 @@
 package config
 
 import (
+	"crypto/tls"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/damiankw/hvapi/internal/tlscert"
 )
 
 func write(t *testing.T, body string) string {
@@ -67,6 +70,58 @@ func TestValidateIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestTLS(t *testing.T) {
+	dir := t.TempDir()
+	certPEM, keyPEM, err := tlscert.Generate(tlscert.Options{CommonName: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "c.pem"), certPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "k.pem"), keyPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	base := `"api_keys":[{"id":"mon","sha256":"` + goodHash + `"}],"allowed_cidrs":["10.0.0.0/24"]`
+	p := filepath.Join(dir, "config.json")
+
+	// Relative paths resolve against the config directory; defaults apply.
+	if err := os.WriteFile(p, []byte(`{`+base+`,"tls":{"cert_file":"c.pem","key_file":"k.pem"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.TLSEnabled() || c.Scheme() != "https" || c.TLSCertPath != filepath.Join(dir, "c.pem") || c.TLS.MinVersion != "1.2" || c.TLSMinVersion() != tls.VersionTLS12 {
+		t.Errorf("tls config = %+v", c)
+	}
+	if c.LogRotate.MaxMB != DefaultLogMaxMB || c.LogRotate.Keep != DefaultLogKeep {
+		t.Errorf("log rotate defaults = %+v", c.LogRotate)
+	}
+
+	for name, body := range map[string]string{
+		"key only":     `{` + base + `,"tls":{"key_file":"k.pem"}}`,
+		"missing file": `{` + base + `,"tls":{"cert_file":"nope.pem","key_file":"k.pem"}}`,
+		"bad version":  `{` + base + `,"tls":{"cert_file":"c.pem","key_file":"k.pem","min_version":"1.1"}}`,
+		"version only": `{` + base + `,"tls":{"min_version":"1.3"}}`,
+	} {
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "tls") {
+			t.Errorf("%s: expected a tls error, got %v", name, err)
+		}
+	}
+
+	if err := os.WriteFile(p, []byte(`{`+base+`,"tls":{"cert_file":"c.pem","key_file":"k.pem","min_version":"1.3"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := Load(p); err != nil || c.TLSMinVersion() != tls.VersionTLS13 {
+		t.Errorf("min 1.3: %v %v", c, err)
+	}
+}
+
 func TestFieldsCoverEveryJSONKey(t *testing.T) {
 	// Every documented key must have a meaning, and the well-known keys must be documented.
 	for _, f := range Fields {
@@ -74,7 +129,7 @@ func TestFieldsCoverEveryJSONKey(t *testing.T) {
 			t.Errorf("%s has no meaning", f.Key)
 		}
 	}
-	for _, k := range []string{"listen", "api_keys", "allowed_cidrs", "rate_limit.per_second", "rate_limit.burst", "log_file", "poll.state_seconds", "poll.heavy_seconds", "tls.cert_file", "tls.key_file"} {
+	for _, k := range []string{"listen", "api_keys", "allowed_cidrs", "rate_limit.per_second", "rate_limit.burst", "log_file", "log_rotate.max_mb", "log_rotate.keep", "poll.state_seconds", "poll.heavy_seconds", "tls.cert_file", "tls.key_file", "tls.min_version"} {
 		if Describe(k) == "" {
 			t.Errorf("%s is not documented", k)
 		}
