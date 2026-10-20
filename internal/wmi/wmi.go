@@ -53,6 +53,15 @@ var ErrNotAllowed = errors.New("not allowed: hvapi is read-only")
 // which is normal on hosts without that feature (older OS, no cluster).
 var ErrInvalidClass = errors.New("class not found in namespace")
 
+// ErrAccessDenied is returned when WMI refuses the caller. For Hyper-V data
+// this almost always means the process is not elevated and the account is
+// not in Hyper-V Administrators.
+var ErrAccessDenied = errors.New("access denied by WMI")
+
+// ErrNamespaceNotFound is returned when the namespace does not exist, for
+// example root\virtualization\v2 on a host without the Hyper-V role.
+var ErrNamespaceNotFound = errors.New("WMI namespace not found")
+
 // Querier is what the collector needs; Client implements it, tests fake it.
 type Querier interface {
 	Query(ctx context.Context, namespace, wql string) ([]Row, error)

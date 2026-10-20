@@ -36,11 +36,13 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
    | `poll` | Poll intervals in seconds (used from phase 2). |
    | `tls` | Reserved for HTTPS later. Leave empty. |
 
-5. Test it in a console:
+5. Test it from an **elevated** console (Run as administrator), because reading Hyper-V data needs it:
 
    ```powershell
    .\hvapi.exe run
    ```
+
+   If the prompt is not elevated, `run` stops with a message saying so instead of serving empty data. `run -force` starts anyway and lists the problem under `warnings` in `/status`.
 
 6. Install and start the service (Administrator PowerShell):
 
@@ -116,13 +118,11 @@ sc.exe config hvapi obj= "DOMAIN\svc-hvapi" password= "..."
 
 The account needs to read Hyper-V data: membership of **Hyper-V Administrators** (and, from phase 5, **Event Log Readers** for event endpoints). If `/status` shows access denied errors, this is the first thing to check.
 
-## Verifying on a host
+## Troubleshooting
 
-Phase 2 was written against the Hyper-V WMI v2 documentation and tested with recorded data, not yet on a live host. To check a host:
+**Empty `/vms` or notes everywhere.** Open `/status`. Its `warnings` say when the start-up check failed, and each source shows its row count and error. "Access denied" means the account cannot read Hyper-V WMI: use an elevated prompt for `run`, or for the service put its account in Hyper-V Administrators. "Namespace not found" means the Hyper-V role is not installed.
 
-1. Run `hvapi run` in a console and open `/status`. Every source should show `rows` greater than zero and no `error`. `dynamic_memory_counters` may legitimately be missing on some hosts.
-2. Compare `/vms/summary` with Hyper-V Manager.
-3. For anything that looks wrong, query the class directly and share the output:
+**Checking what a host exposes.** `/status` should show `rows` greater than zero and no `error` for every source; `dynamic_memory_counters` may legitimately be missing on some hosts. For anything that looks wrong, query the class directly and share the output:
 
    ```powershell
    .\hvapi.exe wmi "SELECT * FROM Msvm_ComputerSystem WHERE Caption = 'Virtual Machine'"

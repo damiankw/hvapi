@@ -280,6 +280,7 @@ type PollStatus struct {
 // Status is the /status response.
 type Status struct {
 	WMIAvailable bool       `json:"wmi_available" doc:"False on a build or host without WMI; every VM endpoint is then empty."`
+	Warnings     []string   `json:"warnings,omitempty" doc:"Start-up problems, such as Hyper-V WMI refusing access to the service account. Fix these first."`
 	VMCount      int        `json:"vm_count"`
 	State        PollStatus `json:"state_poll" doc:"The fast loop: VM state, load, heartbeat."`
 	Settings     PollStatus `json:"settings_poll" doc:"The slow loop: configuration, disks, network."`

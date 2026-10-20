@@ -21,16 +21,24 @@ type Poller struct {
 	state    atomic.Pointer[StateData]
 	settings atomic.Pointer[SettingsData]
 
-	mu         sync.Mutex
-	stateRuns  int64
-	heavyRuns  int64
-	stateStat  []SourceStatus
-	heavyStat  []SourceStatus
-	stateLast  time.Time
-	heavyLast  time.Time
-	stateTook  time.Duration
-	heavyTook  time.Duration
-	unavailble bool
+	mu        sync.Mutex
+	stateRuns int64
+	heavyRuns int64
+	stateStat []SourceStatus
+	heavyStat []SourceStatus
+	stateLast time.Time
+	heavyLast time.Time
+	stateTook time.Duration
+	heavyTook time.Duration
+	warnings  []string
+}
+
+// AddWarning records a start-up problem (for example a failed Preflight) so
+// /status shows it alongside the per-source errors.
+func (p *Poller) AddWarning(msg string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.warnings = append(p.warnings, msg)
 }
 
 // NewPoller returns a Poller that is not running yet.
@@ -111,6 +119,7 @@ func (p *Poller) Status() Status {
 	defer p.mu.Unlock()
 	st := Status{
 		WMIAvailable: true,
+		Warnings:     append([]string(nil), p.warnings...),
 		State:        PollStatus{IntervalSeconds: int(p.stateEvery.Seconds()), Runs: p.stateRuns, LastDurationMs: p.stateTook.Milliseconds(), Sources: append([]SourceStatus(nil), p.stateStat...)},
 		Settings:     PollStatus{IntervalSeconds: int(p.heavyEvery.Seconds()), Runs: p.heavyRuns, LastDurationMs: p.heavyTook.Milliseconds(), Sources: append([]SourceStatus(nil), p.heavyStat...)},
 	}

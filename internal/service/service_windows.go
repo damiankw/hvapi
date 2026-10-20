@@ -18,6 +18,12 @@ func IsService() (bool, error) {
 	return svc.IsWindowsService()
 }
 
+// IsElevated reports whether the process runs with an elevated token
+// ("Run as administrator", or a service running as LocalSystem).
+func IsElevated() bool {
+	return windows.GetCurrentProcessToken().IsElevated()
+}
+
 // Install registers the service to start automatically and restart on failure.
 // It runs as LocalSystem; change the account afterwards with
 // sc.exe config hvapi obj= "DOMAIN\account" password= "..."

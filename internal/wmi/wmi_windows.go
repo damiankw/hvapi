@@ -29,6 +29,8 @@ const (
 	wbemErrInvalidClass       = 0x80041010
 	wbemErrInvalidNamespace   = 0x8004100E
 	wbemErrInvalidQuery       = 0x80041017
+	wbemErrAccessDenied       = 0x80041003
+	eAccessDenied             = 0x80070005
 )
 
 // Query runs a WQL read in the namespace and returns every instance.
@@ -277,13 +279,21 @@ func translate(err error) error {
 		case wbemErrInvalidClass:
 			return fmt.Errorf("%w (%s)", ErrInvalidClass, err)
 		case wbemErrInvalidNamespace:
-			return fmt.Errorf("namespace not found (%s)", err)
+			return fmt.Errorf("%w (%s)", ErrNamespaceNotFound, err)
 		case wbemErrInvalidQuery:
 			return fmt.Errorf("invalid query (%s)", err)
+		case wbemErrAccessDenied, eAccessDenied:
+			return fmt.Errorf("%w (%s)", ErrAccessDenied, err)
 		}
 	}
-	if strings.Contains(err.Error(), "Invalid class") {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "Invalid class"):
 		return fmt.Errorf("%w (%s)", ErrInvalidClass, err)
+	case strings.Contains(msg, "Invalid namespace"):
+		return fmt.Errorf("%w (%s)", ErrNamespaceNotFound, err)
+	case strings.Contains(msg, "Access denied"), strings.Contains(msg, "access is denied"):
+		return fmt.Errorf("%w (%s)", ErrAccessDenied, err)
 	}
 	return err
 }

@@ -50,12 +50,19 @@ type command struct {
 func commands() []command {
 	return []command{
 		{
-			name: "run", args: "[-config path]",
+			name: "run", args: "[-config path] [-force]",
 			short: "Run the API in this console (Ctrl+C to stop)",
 			long: `Starts the HTTP server in the foreground using the config file and logs
 to the console as well as the log file. Use it to test a configuration
 before installing the service. The Service Control Manager also starts
-the service through this command.`,
+the service through this command.
+
+Before serving, hvapi checks that it can read Hyper-V data over WMI. In a
+console that check must pass, because the usual cause of failure is a
+prompt that is not elevated: start it with "Run as administrator", or as a
+member of Hyper-V Administrators. -force starts anyway and reports the
+problem under "warnings" in /status instead. As a service the check never
+stops start-up; its result is logged and shown in /status.`,
 			run: cmdRun,
 		},
 		{
@@ -148,7 +155,7 @@ func dispatch(args []string, in io.Reader, out io.Writer) error {
 		if len(args) > 0 && args[0] == "run" {
 			cfgPath = parseConfigFlag("run", args[1:])
 		}
-		return service.Run(func(ctx context.Context) error { return serve(ctx, cfgPath, true) })
+		return service.Run(func(ctx context.Context) error { return serve(ctx, cfgPath, true, true) })
 	}
 
 	if len(args) == 0 {
@@ -172,10 +179,13 @@ func dispatch(args []string, in io.Reader, out io.Writer) error {
 }
 
 func cmdRun(args []string, _ io.Reader, _ io.Writer) error {
-	cfgPath := parseConfigFlag("run", args)
+	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	cfgPath := fs.String("config", defaultConfigPath(), "path to config file")
+	force := fs.Bool("force", false, "start even if Hyper-V data cannot be read")
+	_ = fs.Parse(args)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	return serve(ctx, cfgPath, false)
+	return serve(ctx, *cfgPath, false, *force)
 }
 
 func cmdConfigure(args []string, in io.Reader, out io.Writer) error {
@@ -311,7 +321,8 @@ func parseConfigFlag(cmd string, args []string) string {
 }
 
 // serve loads the config and runs the HTTP server until ctx is cancelled.
-func serve(ctx context.Context, cfgPath string, asService bool) error {
+// Unless force is set, a failed Hyper-V read check stops start-up.
+func serve(ctx context.Context, cfgPath string, asService, force bool) error {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return err
@@ -327,11 +338,29 @@ func serve(ctx context.Context, cfgPath string, asService bool) error {
 		log.Warn("listening on all interfaces; bind to the management NIC's IP instead", "listen", cfg.Listen)
 	}
 
+	// Can we read Hyper-V data at all? Say so once, clearly, before serving.
+	client := wmi.New()
+	elevated := service.IsElevated()
+	poller := hyperv.NewPoller(client, log,
+		time.Duration(cfg.Poll.StateSeconds)*time.Second, time.Duration(cfg.Poll.HeavySeconds)*time.Second)
+	if perr := hyperv.Preflight(ctx, client); perr != nil {
+		advice := hyperv.ExplainPreflight(perr, elevated)
+		if errors.Is(perr, wmi.ErrUnavailable) {
+			log.Warn(advice)
+		} else if !force {
+			log.Error("Hyper-V check failed; not starting", "error", perr.Error())
+			return fmt.Errorf("%s\n(Use 'hvapi run -force' to start anyway and see details in /status.)", advice)
+		} else {
+			log.Error("Hyper-V check failed; starting anyway", "error", perr.Error(), "advice", advice)
+			poller.AddWarning(advice)
+		}
+	} else if !elevated {
+		log.Warn("running without elevation; Hyper-V data is readable, so the account must be in Hyper-V Administrators")
+	}
+
 	// The poller fills the cache in the background; handlers only read it.
 	pollCtx, stopPoll := context.WithCancel(ctx)
 	defer stopPoll()
-	poller := hyperv.NewPoller(wmi.New(), log,
-		time.Duration(cfg.Poll.StateSeconds)*time.Second, time.Duration(cfg.Poll.HeavySeconds)*time.Second)
 	go poller.Run(pollCtx)
 
 	srv := server.New(cfg, log, server.Deps{Data: poller.Data, Status: poller.Status})
