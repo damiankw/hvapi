@@ -7,7 +7,7 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 - HTTPS built in, API key and IP allowlist on every request
 - Documents itself: Swagger UI at `/docs`, OpenAPI at `/openapi.json`
 
-> **Status:** 0.3.x covers VM inventory, summary, configuration, processor, memory, disks and network, served over HTTPS. Host, switch, checkpoint, event and performance endpoints are planned; the roadmap is in `CLAUDE.md`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+> **Status:** 0.4.x covers the VMs (inventory, summary, configuration, processor, memory, disks, network), the host (hardware, OS, services, storage, network, performance, NUMA, hypervisor, migration, cluster) and virtual switches, all over HTTPS. Checkpoint, event and performance history endpoints are planned; the roadmap is in `CLAUDE.md`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Secure the connection first
 
@@ -102,6 +102,18 @@ All endpoints are `GET` and need the API key except `/health`, `/docs` and `/ope
 | `/vms/{id}/memory` | Startup/min/max, dynamic memory, assigned, demand and pressure |
 | `/vms/{id}/disks` | Controllers, drives and the VHD, ISO or physical disk in each |
 | `/vms/{id}/network` | Adapters, MAC, switch, VLAN, guest addresses |
+| `/host` | Hardware, OS, memory, processors, Hyper-V defaults, VM counts |
+| `/host/services` | vmms, vmcompute and hvhost state; `all_running` to alert on |
+| `/host/storage` | Volumes and cluster shared volumes with free space, health and which VMs live there |
+| `/host/network` | Physical adapters, link state and speed, switch binding |
+| `/host/perf` | Hypervisor CPU usage, partitions, memory, balancer pressure |
+| `/host/numa` | NUMA nodes with processors and memory |
+| `/host/hypervisor` | Hypervisor presence, build, scheduler type, VBS status |
+| `/host/migration` | Live migration settings and networks |
+| `/host/cluster` | Cluster name, nodes, roles and resources, or `clustered: false` |
+| `/switches` | Virtual switches: type, bound adapters, teaming, extensions |
+| `/switches/{id}` | One switch with its ports |
+| `/switches/{id}/ports` | Host-side and VM ports with VLAN settings |
 
 Data that a host does not have (for example dynamic memory counters, or guest details when integration services are off) is left out and explained in a `notes` array rather than failing the request. A `503` with `Retry-After` means the poller has not completed its first run yet.
 

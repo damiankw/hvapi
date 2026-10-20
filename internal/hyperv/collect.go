@@ -27,6 +27,17 @@ var stateSources = []source{
 	{"memory", wmi.NSVirtualization, "SELECT * FROM Msvm_Memory", true},
 	{"heartbeat", wmi.NSVirtualization, "SELECT * FROM Msvm_HeartbeatComponent", true},
 	{"dynamic_memory_counters", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_BalancerStats_HyperVDynamicMemoryVM", true},
+	// Host (phase 4): things that change by the minute.
+	{"host_services", wmi.NSCIMv2, "SELECT Name, DisplayName, State, StartMode, Status, ProcessId, StartName, ExitCode FROM Win32_Service WHERE Name = 'vmms' OR Name = 'vmcompute' OR Name = 'hvhost'", false},
+	{"operating_system", wmi.NSCIMv2, "SELECT * FROM Win32_OperatingSystem", false},
+	{"hv_logical_processors", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_HvStats_HyperVHypervisorLogicalProcessor", true},
+	{"hv_root_processors", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_HvStats_HyperVHypervisorRootVirtualProcessor", true},
+	{"hypervisor_counters", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_HvStats_HyperVHypervisor", true},
+	{"os_memory_counters", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_PerfOS_Memory", true},
+	{"memory_balancer_counters", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_BalancerStats_HyperVDynamicMemoryBalancer", true},
+	{"cluster_nodes", wmi.NSCluster, "SELECT * FROM MSCluster_Node", true},
+	{"cluster_groups", wmi.NSCluster, "SELECT * FROM MSCluster_ResourceGroup", true},
+	{"cluster_resources", wmi.NSCluster, "SELECT * FROM MSCluster_Resource", true},
 }
 
 // Settings sources: heavier, polled less often.
@@ -42,8 +53,25 @@ var settingsSources = []source{
 	{"ethernet_connections", wmi.NSVirtualization, "SELECT * FROM Msvm_EthernetPortAllocationSettingData", true},
 	{"vlan_settings", wmi.NSVirtualization, "SELECT * FROM Msvm_EthernetSwitchPortVlanSettingData", true},
 	{"guest_network", wmi.NSVirtualization, "SELECT * FROM Msvm_GuestNetworkAdapterConfiguration", true},
-	{"switches", wmi.NSVirtualization, "SELECT Name, ElementName FROM Msvm_VirtualEthernetSwitch", true},
+	{"switches", wmi.NSVirtualization, "SELECT * FROM Msvm_VirtualEthernetSwitch", true},
 	{"kvp", wmi.NSVirtualization, "SELECT * FROM Msvm_KvpExchangeComponent", true},
+	// Host (phase 4): hardware, OS, Hyper-V settings, storage, networking.
+	{"host_computer", wmi.NSCIMv2, "SELECT * FROM Win32_ComputerSystem", false},
+	{"host_processors", wmi.NSCIMv2, "SELECT * FROM Win32_Processor", true},
+	{"management_settings", wmi.NSVirtualization, "SELECT * FROM Msvm_VirtualSystemManagementServiceSettingData", true},
+	{"volumes", wmi.NSStorage, "SELECT * FROM MSFT_Volume", true},
+	{"cluster_shared_volumes", wmi.NSCluster, "SELECT * FROM MSCluster_ClusterSharedVolume", true},
+	{"net_adapters", wmi.NSStandardCIMv2, "SELECT * FROM MSFT_NetAdapter", true},
+	{"external_ports", wmi.NSVirtualization, "SELECT * FROM Msvm_ExternalEthernetPort", true},
+	{"internal_ports", wmi.NSVirtualization, "SELECT * FROM Msvm_InternalEthernetPort", true},
+	{"numa_nodes", wmi.NSVirtualization, "SELECT * FROM Msvm_NumaNode", true},
+	{"migration_settings", wmi.NSVirtualization, "SELECT * FROM Msvm_VirtualSystemMigrationServiceSettingData", true},
+	{"migration_networks", wmi.NSVirtualization, "SELECT * FROM Msvm_VirtualSystemMigrationNetworkSettingData", true},
+	{"cluster", wmi.NSCluster, "SELECT * FROM MSCluster_Cluster", true},
+	{"switch_settings", wmi.NSVirtualization, "SELECT * FROM Msvm_VirtualEthernetSwitchSettingData", true},
+	{"switch_ports", wmi.NSVirtualization, "SELECT * FROM Msvm_EthernetSwitchPort", true},
+	{"switch_extensions", wmi.NSVirtualization, "SELECT * FROM Msvm_EthernetSwitchExtension", true},
+	{"device_guard", `root\Microsoft\Windows\DeviceGuard`, "SELECT * FROM Win32_DeviceGuard", true},
 }
 
 // rowSet is the raw result of one poll: rows and errors per source.
@@ -164,8 +192,9 @@ func buildState(rs *rowSet) *StateData {
 // SettingsData is the result of one settings poll, grouped by VM.
 type SettingsData struct {
 	*rowSet
-	vms      map[string]*vmSettings
-	switches map[string]string // switch GUID -> name
+	vms           map[string]*vmSettings
+	switches      map[string]string // switch GUID -> name
+	schedulerType string            // from the hypervisor event log, when collected
 }
 
 type vmSettings struct {

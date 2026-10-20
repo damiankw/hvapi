@@ -623,20 +623,7 @@ func (d *Data) Network(id string) (*VMNetwork, error) {
 				}
 			}
 			a.Connected = c.Int("EnabledState") == 2 && a.SwitchID != ""
-			connID := strings.ToLower(c.String("InstanceID"))
-			for _, v := range set.vlans {
-				if !strings.HasPrefix(strings.ToLower(v.String("InstanceID")), connID+`\`) {
-					continue
-				}
-				a.VLANMode = lookup(vlanModes, v.Int("OperationMode"))
-				switch v.Int("OperationMode") {
-				case 2:
-					a.VLANID = v.Int("NativeVlanId")
-					a.TrunkVLANs = v.Ints("TrunkVlanIdArray")
-				default:
-					a.VLANID = v.Int("AccessVlanId")
-				}
-			}
+			a.VLANMode, a.VLANID, a.TrunkVLANs = vlanFor(set.vlans, c.String("InstanceID"))
 		}
 		segs := instanceSegments(a.InstanceID)
 		adapterGUID := strings.ToLower(segs[len(segs)-1])

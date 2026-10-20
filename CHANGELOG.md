@@ -2,6 +2,20 @@
 
 Notable changes to hvapi. The format follows [Keep a Changelog](https://keepachangelog.com/) and versions follow [Semantic Versioning](https://semver.org/). Each `## x.y.z` section becomes the release notes for that version.
 
+## 0.4.0 - 2026-10-20
+
+Host and networking.
+
+### Added
+
+- `/host`: hardware, OS, memory, processors, Hyper-V defaults (paths, MAC range, NUMA spanning) and VM counts.
+- `/host/services`: state of vmms, vmcompute and hvhost with an `all_running` flag.
+- `/host/storage`: every volume and cluster shared volume with size, free space, health, CSV owner, and which VMs keep files on it.
+- `/host/network`: physical and host-side adapters with link state, speed, MTU and the virtual switch they are bound to.
+- `/host/perf`: hypervisor logical processor usage, root partition time, partition counts, OS memory counters and dynamic memory balancer pressure.
+- `/host/numa`, `/host/hypervisor` (including virtualization-based security status), `/host/migration`, `/host/cluster` (nodes, roles, resources with their VM IDs; `clustered: false` on a standalone host).
+- `/switches`, `/switches/{id}`, `/switches/{id}/ports`: switch type, bound adapters, management OS access, embedded teaming, SR-IOV, bandwidth mode, extensions, and every host-side and VM port with VLAN settings.
+
 ## 0.3.0 - 2026-10-20
 
 Security release: hvapi can now serve HTTPS itself, for installations that cannot put a reverse proxy in front of it.

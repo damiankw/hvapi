@@ -46,13 +46,15 @@ type state struct {
 var tags = []openapi.Tag{
 	{Name: "service", Description: "Health, version, documentation and collector status of hvapi itself."},
 	{Name: "vms", Description: "Virtual machines: inventory, state, configuration and resources. Served from a cache the background poller keeps fresh."},
-	// Phase 3 onwards: host, switches, jobs, events, diagnostics, wmi.
+	{Name: "host", Description: "The Hyper-V host itself: hardware, OS, services, storage, network, performance, cluster."},
+	{Name: "switches", Description: "Virtual switches and their ports."},
 }
 
 // routes is the single source of truth: every entry is both registered on
 // the mux and written into the OpenAPI document.
 func (s *state) routes() []route {
-	return append(s.serviceRoutes(), s.vmRoutes()...)
+	routes := append(s.serviceRoutes(), s.vmRoutes()...)
+	return append(routes, s.hostRoutes()...)
 }
 
 func (s *state) serviceRoutes() []route {

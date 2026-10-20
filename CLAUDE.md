@@ -28,6 +28,8 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 
 **Phase 1 (foundation) is done:** config loading and validation, API key, IP allowlist, rate limit, JSON logging, Windows service install/uninstall/run, `hash-key`, `configure`, `show-config`, `help` and `openapi` commands, `/health` (no key), `/version`, `/openapi.json` and `/docs`. Tests sit next to each package.
 
+**Phase 4 (host and networking) is done (v0.4.0):** `/host`, `/host/services`, `/host/storage` (volumes plus CSVs, with VM file placement by longest mount-point prefix), `/host/network`, `/host/perf`, `/host/numa`, `/host/hypervisor` (scheduler type left for the events phase), `/host/migration`, `/host/cluster`, `/switches`, `/switches/{id}`, `/switches/{id}/ports`. Switch topology comes from the EPASD rows: host-side ports have `HostResource` of class `Msvm_ExternalEthernetPort` or `Msvm_InternalEthernetPort` and an InstanceID starting with the switch GUID; VM ports reference the switch. A missing `root\MSCluster` namespace means "not clustered", not an error. Fixtures in `internal/hyperv/host_test.go`.
+
 **Phase 3 (security) is done (v0.3.0):** built-in HTTPS with certificate reload, `gen-cert`, HTTPS step in `configure`, certificate details in `show-config`, `tls`/`tls_expires` in `/health`, HSTS, log rotation, WMI in-flight cap.
 
 **Phase 2 (core VM data) is done and confirmed on a real Hyper-V host** (`/status` and `/vms/summary` verified by the owner): read-only WMI client with query and method allowlists, cache and two-interval poller, start-up preflight (refuses an unelevated console when WMI denies access; `run -force` overrides; warnings in `/status`), `/status`, `/vms`, `/vms/summary`, `/vms/{id}` and its `summary`, `config`, `processor`, `memory`, `disks`, `network`, plus the `hvapi wmi` command. Tests use recorded-style fixtures (`internal/hyperv/fixtures_test.go`). Released as **v0.2.0**. Items still worth confirming from a host's `/status` output when convenient: the dynamic memory counter class name, the InstanceID layout of snapshot settings (only matters for the fallback linking path), and whether `Msvm_EthernetSwitchPortVlanSettingData` InstanceIDs start with the connection's InstanceID.
@@ -39,7 +41,7 @@ Each phase ships as a minor version: phase N is released as v0.N.0, with patch r
 1. Foundation: done (part of v0.2.0).
 2. Core VM data: done (v0.2.0).
 3. Security: done (v0.3.0). Built-in TLS, certificate generation and reload, log rotation, WMI call cap.
-4. Host and networking (v0.4.0): all `/host/*` endpoints and `/switches/*`.
+4. Host and networking: done (v0.4.0).
 5. Deep VM detail (v0.5.0): `integration`, `kvp`, `checkpoints`, `disks/{diskId}/state`, `replication`, `devices`, `security`, `metering`, `thumbnail`.
 6. Activity and performance (v0.6.0): `/jobs`, `/events`, `/events/{log}`, host and VM `/perf`.
 7. Analysis (v0.7.0): `/diagnostics`, `/metrics` (Prometheus), raw `/wmi/classes` and `/wmi/{class}`. (API reference is generated; see the API documentation decision above.)
