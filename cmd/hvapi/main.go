@@ -24,6 +24,7 @@ import (
 
 	"github.com/damiankw/hvapi/internal/auth"
 	"github.com/damiankw/hvapi/internal/config"
+	"github.com/damiankw/hvapi/internal/evtlog"
 	"github.com/damiankw/hvapi/internal/hyperv"
 	"github.com/damiankw/hvapi/internal/logfile"
 	"github.com/damiankw/hvapi/internal/server"
@@ -395,6 +396,7 @@ func serve(ctx context.Context, cfgPath string, asService, force bool) error {
 	elevated := service.IsElevated()
 	poller := hyperv.NewPoller(client, log,
 		time.Duration(cfg.Poll.StateSeconds)*time.Second, time.Duration(cfg.Poll.HeavySeconds)*time.Second)
+	poller.SetEvents(hyperv.EventSource{Reader: evtlog.New(), Hours: cfg.Events.Hours, MaxPerLog: cfg.Events.MaxPerLog})
 	if perr := hyperv.Preflight(ctx, client); perr != nil {
 		advice := hyperv.ExplainPreflight(perr, elevated)
 		if errors.Is(perr, wmi.ErrUnavailable) {

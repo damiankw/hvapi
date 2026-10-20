@@ -8,5 +8,6 @@
   "log_file": "hvapi.log",
   "log_rotate": { "max_mb": 10, "keep": 5 },
   "poll": { "state_seconds": 10, "heavy_seconds": 60 },
+  "events": { "hours": 24, "max_per_log": 500 },
   "tls": { "cert_file": "hvapi-cert.pem", "key_file": "hvapi-key.pem", "min_version": "1.2" }
 }

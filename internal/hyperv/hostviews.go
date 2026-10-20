@@ -457,6 +457,7 @@ func (d *Data) HostPerf() (*HostPerf, error) {
 		out.BalancerAvailableMB, out.BalancerPressure = intPtr(b, "AvailableMemory"), intPtr(b, "SystemCurrentPressure")
 	}
 	out.Notes = d.State.errorNotes("hv_logical_processors", "hv_root_processors", "hypervisor_counters", "os_memory_counters", "memory_balancer_counters")
+	d.hostPerfExtras(out)
 	return out, nil
 }
 

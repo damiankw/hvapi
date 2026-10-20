@@ -29,6 +29,12 @@ type Poll struct {
 	HeavySeconds int `json:"heavy_seconds"`
 }
 
+// Events bounds what is read from the Hyper-V event logs on each heavy poll.
+type Events struct {
+	Hours     int `json:"hours"`
+	MaxPerLog int `json:"max_per_log"`
+}
+
 // TLS enables HTTPS when both files are set. Paths are relative to the
 // config file. Files are PEM; 'hvapi gen-cert' makes a self-signed pair.
 type TLS struct {
@@ -52,6 +58,7 @@ type Config struct {
 	LogFile      string    `json:"log_file"`
 	LogRotate    LogRotate `json:"log_rotate"`
 	Poll         Poll      `json:"poll"`
+	Events       Events    `json:"events"`
 	TLS          TLS       `json:"tls"`
 
 	// Parsed forms, filled in by Read and Validate.
@@ -94,6 +101,8 @@ const (
 	DefaultLogMaxMB     = 10
 	DefaultLogKeep      = 5
 	DefaultTLSMin       = "1.2"
+	DefaultEventHours   = 24
+	DefaultEventsPerLog = 500
 )
 
 // Load reads, defaults and validates the config file at path.
@@ -149,6 +158,12 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Poll.HeavySeconds <= 0 {
 		c.Poll.HeavySeconds = DefaultHeavySeconds
+	}
+	if c.Events.Hours <= 0 {
+		c.Events.Hours = DefaultEventHours
+	}
+	if c.Events.MaxPerLog <= 0 {
+		c.Events.MaxPerLog = DefaultEventsPerLog
 	}
 	if c.LogRotate.MaxMB <= 0 {
 		c.LogRotate.MaxMB = DefaultLogMaxMB

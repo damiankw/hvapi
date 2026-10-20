@@ -84,6 +84,8 @@ func writeSummary(out io.Writer, cfgPath string, c *config.Config, raw *config.C
 	setting("poll.state_seconds", fmt.Sprint(c.Poll.StateSeconds)+mark(raw != nil && raw.Poll.StateSeconds <= 0))
 	setting("poll.heavy_seconds", fmt.Sprint(c.Poll.HeavySeconds)+mark(raw != nil && raw.Poll.HeavySeconds <= 0))
 
+	setting("events.hours", fmt.Sprint(c.Events.Hours)+mark(raw != nil && raw.Events.Hours <= 0))
+	setting("events.max_per_log", fmt.Sprint(c.Events.MaxPerLog)+mark(raw != nil && raw.Events.MaxPerLog <= 0))
 	setting("log_rotate.max_mb", fmt.Sprint(c.LogRotate.MaxMB)+mark(raw != nil && raw.LogRotate.MaxMB <= 0))
 	setting("log_rotate.keep", fmt.Sprint(c.LogRotate.Keep)+mark(raw != nil && raw.LogRotate.Keep == 0))
 

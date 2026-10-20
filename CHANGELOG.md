@@ -2,6 +2,19 @@
 
 Notable changes to hvapi. The format follows [Keep a Changelog](https://keepachangelog.com/) and versions follow [Semantic Versioning](https://semver.org/). Each `## x.y.z` section becomes the release notes for that version.
 
+## 0.6.0 - 2026-10-20
+
+Activity and performance.
+
+### Added
+
+- `/jobs`: running and recent Hyper-V jobs, including storage jobs, with `failed` and `stuck` flags and counts.
+- `/events` and `/events/{log}`: the Hyper-V VMMS, Worker, Hypervisor, Compute, VmSwitch and High Availability logs, read through the Windows Event Log API with rendered messages, cached for the last `events.hours` (default 24) up to `events.max_per_log` (default 500) each. Filter by level, hours, limit, event ID or VM. Needs the Event Log Readers right for the service account.
+- `/vms/{id}/perf`: per virtual processor run time, virtual network adapter throughput and drops, virtual disk throughput, queue length, latency and errors.
+- `/host/perf` now includes host network interfaces, logical disks (latency, queue, free space) and virtual switch throughput.
+- `/host/hypervisor` reports the scheduler type (Classic, Core or Root) from the hypervisor's event log.
+- New config block `events` with `hours` and `max_per_log`.
+
 ## 0.5.0 - 2026-10-20
 
 Deep VM detail.

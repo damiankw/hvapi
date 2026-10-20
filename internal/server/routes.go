@@ -48,6 +48,7 @@ var tags = []openapi.Tag{
 	{Name: "vms", Description: "Virtual machines: inventory, state, configuration and resources. Served from a cache the background poller keeps fresh."},
 	{Name: "host", Description: "The Hyper-V host itself: hardware, OS, services, storage, network, performance, cluster."},
 	{Name: "switches", Description: "Virtual switches and their ports."},
+	{Name: "activity", Description: "Jobs and event logs."},
 }
 
 // routes is the single source of truth: every entry is both registered on
@@ -55,7 +56,8 @@ var tags = []openapi.Tag{
 func (s *state) routes() []route {
 	routes := append(s.serviceRoutes(), s.vmRoutes()...)
 	routes = append(routes, s.deepRoutes()...)
-	return append(routes, s.hostRoutes()...)
+	routes = append(routes, s.hostRoutes()...)
+	return append(routes, s.activityRoutes()...)
 }
 
 func (s *state) serviceRoutes() []route {

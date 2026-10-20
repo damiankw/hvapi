@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/damiankw/hvapi/internal/evtlog"
 	"github.com/damiankw/hvapi/internal/wmi"
 )
 
@@ -43,6 +44,15 @@ var stateSources = []source{
 	{"cluster_nodes", wmi.NSCluster, "SELECT * FROM MSCluster_Node", true},
 	{"cluster_groups", wmi.NSCluster, "SELECT * FROM MSCluster_ResourceGroup", true},
 	{"cluster_resources", wmi.NSCluster, "SELECT * FROM MSCluster_Resource", true},
+	// Activity and performance (phase 6).
+	{"jobs", wmi.NSVirtualization, "SELECT * FROM Msvm_ConcreteJob", true},
+	{"storage_jobs", wmi.NSVirtualization, "SELECT * FROM Msvm_StorageJob", true},
+	{"vp_counters", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_HvStats_HyperVHypervisorVirtualProcessor", true},
+	{"vnic_counters", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_NvspNicStats_HyperVVirtualNetworkAdapter", true},
+	{"vdisk_counters", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_Counters_HyperVVirtualStorageDevice", true},
+	{"vswitch_counters", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_NvspSwitchStats_HyperVVirtualSwitch", true},
+	{"host_nic_counters", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_Tcpip_NetworkInterface", true},
+	{"host_disk_counters", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_PerfDisk_LogicalDisk", true},
 }
 
 // Settings sources: heavier, polled less often.
@@ -244,6 +254,9 @@ type SettingsData struct {
 	vms           map[string]*vmSettings
 	switches      map[string]string // switch GUID -> name
 	schedulerType string            // from the hypervisor event log, when collected
+	events        map[string][]evtlog.Event
+	eventErrs     map[string]error
+	eventHours    int
 }
 
 type vmSettings struct {

@@ -59,6 +59,16 @@ var Fields = []Field{
 		Default: "60",
 	},
 	{
+		Key:     "events.hours",
+		Meaning: "How many hours of Hyper-V event logs to keep in the cache for /events and /diagnostics.",
+		Default: "24",
+	},
+	{
+		Key:     "events.max_per_log",
+		Meaning: "Most events kept per log. Older ones beyond this are dropped.",
+		Default: "500",
+	},
+	{
 		Key:     "tls.cert_file",
 		Meaning: "PEM certificate (with any intermediates) to serve HTTPS. Set together with key_file. A relative path is next to config.json. 'hvapi gen-cert' creates a self-signed pair. Leave both empty for plain HTTP, which is only acceptable behind a reverse proxy or on an isolated management network.",
 	},

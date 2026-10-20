@@ -7,7 +7,7 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 - HTTPS built in, API key and IP allowlist on every request
 - Documents itself: Swagger UI at `/docs`, OpenAPI at `/openapi.json`
 
-> **Status:** 0.5.x covers the VMs in depth (inventory, summary, configuration, processor, memory, disks and disk state, network, integration services, key-value pairs, checkpoints, replication, devices, security, metering, console thumbnails), the host (hardware, OS, services, storage, network, performance, NUMA, hypervisor, migration, cluster) and virtual switches, all over HTTPS. Jobs, event logs, performance counters and diagnostics are planned; the roadmap is in `CLAUDE.md`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+> **Status:** 0.6.x covers the VMs in depth (inventory, summary, configuration, processor, memory, disks and disk state, network, integration services, key-value pairs, checkpoints, replication, devices, security, metering, performance counters, console thumbnails), the host (hardware, OS, services, storage, network, performance, NUMA, hypervisor, migration, cluster), virtual switches, jobs and the Hyper-V event logs, all over HTTPS. Diagnostics and Prometheus metrics are planned; the roadmap is in `CLAUDE.md`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Secure the connection first
 
@@ -60,6 +60,7 @@ In every case, keep the Windows Firewall rule limited to the addresses that need
    | `log_file` | Log path. Relative paths sit next to `config.json`. |
    | `log_rotate` | `max_mb` at which the log is rotated and `keep`, the number of old logs retained, so the log never grows without limit. |
    | `poll` | How often the cache is refreshed: `state_seconds` for VM state and load, `heavy_seconds` for configuration. |
+   | `events` | `hours` of Hyper-V event logs to cache and `max_per_log`. |
    | `tls` | `cert_file` and `key_file` (PEM, relative to `config.json`) turn on HTTPS; `min_version` is `1.2` or `1.3`. Empty means plain HTTP. |
 
 5. Test it from an **elevated** console (Run as administrator), because reading Hyper-V data needs it:
@@ -111,11 +112,15 @@ All endpoints are `GET` and need the API key except `/health`, `/docs` and `/ope
 | `/vms/{id}/security` | Secure Boot and template, TPM, shielding, encryption settings |
 | `/vms/{id}/metering` | Resource metering values when enabled |
 | `/vms/{id}/thumbnail` | **On demand:** PNG of the console (`?width=&height=`), running VMs only |
+| `/vms/{id}/perf` | Per-vCPU run time, virtual NIC throughput and drops, virtual disk throughput and queue, while running |
+| `/jobs` | Running and recent Hyper-V jobs with `failed` and `stuck` flags |
+| `/events` | Hyper-V event logs from the last `events.hours`, newest first; `?level=&hours=&limit=&id=&vm=` |
+| `/events/{log}` | One log: `vmms`, `worker`, `hypervisor`, `compute`, `vmswitch` or `high-availability` |
 | `/host` | Hardware, OS, memory, processors, Hyper-V defaults, VM counts |
 | `/host/services` | vmms, vmcompute and hvhost state; `all_running` to alert on |
 | `/host/storage` | Volumes and cluster shared volumes with free space, health and which VMs live there |
 | `/host/network` | Physical adapters, link state and speed, switch binding |
-| `/host/perf` | Hypervisor CPU usage, partitions, memory, balancer pressure |
+| `/host/perf` | Hypervisor CPU usage, partitions, memory, balancer pressure, host NICs, disks and switch throughput |
 | `/host/numa` | NUMA nodes with processors and memory |
 | `/host/hypervisor` | Hypervisor presence, build, scheduler type, VBS status |
 | `/host/migration` | Live migration settings and networks |
@@ -167,7 +172,7 @@ curl -H "X-API-Key: <your key>" https://10.0.0.10:8085/version
 sc.exe config hvapi obj= "DOMAIN\svc-hvapi" password= "..."
 ```
 
-The account needs to read Hyper-V data: membership of **Hyper-V Administrators** (event log endpoints, when they arrive, will also need **Event Log Readers**). If `/status` shows access denied errors, this is the first thing to check.
+The account needs to read Hyper-V data: membership of **Hyper-V Administrators**, plus **Event Log Readers** for `/events`. If `/status` shows access denied errors, or `/events` lists a `read failed` error for every log, this is the first thing to check.
 
 ## Troubleshooting
 

@@ -139,6 +139,8 @@ func writeDataErr(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusServiceUnavailable, openapi.Error{Error: err.Error()})
 	case errors.Is(err, hyperv.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, openapi.Error{Error: err.Error()})
+	case errors.Is(err, hyperv.ErrBadRequest):
+		writeJSON(w, http.StatusBadRequest, openapi.Error{Error: err.Error()})
 	case errors.Is(err, hyperv.ErrNotRunning):
 		writeJSON(w, http.StatusConflict, openapi.Error{Error: err.Error()})
 	case errors.Is(err, hyperv.ErrOnDemandUnavailable):

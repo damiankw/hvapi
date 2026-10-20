@@ -120,21 +120,24 @@ type LPCounter struct {
 
 // HostPerf is the /host/perf response.
 type HostPerf struct {
-	CollectedAt          time.Time   `json:"collected_at"`
-	CPUTotalPercent      *float64    `json:"cpu_total_percent,omitempty" doc:"Hypervisor logical processor total run time, _Total. The best single number for host CPU use under Hyper-V."`
-	CPUGuestPercent      *float64    `json:"cpu_guest_percent,omitempty"`
-	CPUHypervisorPercent *float64    `json:"cpu_hypervisor_percent,omitempty"`
-	CPURootPercent       *float64    `json:"cpu_root_percent,omitempty" doc:"Time spent in the management OS's own virtual processors."`
-	LogicalProcessors    []LPCounter `json:"logical_processors,omitempty"`
-	Partitions           *int64      `json:"partitions,omitempty" doc:"Running partitions including the root."`
-	VirtualProcessors    *int64      `json:"virtual_processors,omitempty"`
-	MemoryAvailableMB    *int64      `json:"memory_available_mb,omitempty"`
-	MemoryCommittedMB    *int64      `json:"memory_committed_mb,omitempty"`
-	MemoryCommitLimitMB  *int64      `json:"memory_commit_limit_mb,omitempty"`
-	PagesPerSec          *int64      `json:"pages_per_sec,omitempty"`
-	BalancerAvailableMB  *int64      `json:"balancer_available_mb,omitempty" doc:"Memory the dynamic memory balancer can still hand to VMs."`
-	BalancerPressure     *int64      `json:"balancer_pressure_percent,omitempty" doc:"System-wide memory pressure; above 100 means VMs want more than the host can give."`
-	Notes                []string    `json:"notes,omitempty"`
+	CollectedAt          time.Time      `json:"collected_at"`
+	CPUTotalPercent      *float64       `json:"cpu_total_percent,omitempty" doc:"Hypervisor logical processor total run time, _Total. The best single number for host CPU use under Hyper-V."`
+	CPUGuestPercent      *float64       `json:"cpu_guest_percent,omitempty"`
+	CPUHypervisorPercent *float64       `json:"cpu_hypervisor_percent,omitempty"`
+	CPURootPercent       *float64       `json:"cpu_root_percent,omitempty" doc:"Time spent in the management OS's own virtual processors."`
+	LogicalProcessors    []LPCounter    `json:"logical_processors,omitempty"`
+	Partitions           *int64         `json:"partitions,omitempty" doc:"Running partitions including the root."`
+	VirtualProcessors    *int64         `json:"virtual_processors,omitempty"`
+	MemoryAvailableMB    *int64         `json:"memory_available_mb,omitempty"`
+	MemoryCommittedMB    *int64         `json:"memory_committed_mb,omitempty"`
+	MemoryCommitLimitMB  *int64         `json:"memory_commit_limit_mb,omitempty"`
+	PagesPerSec          *int64         `json:"pages_per_sec,omitempty"`
+	BalancerAvailableMB  *int64         `json:"balancer_available_mb,omitempty" doc:"Memory the dynamic memory balancer can still hand to VMs."`
+	BalancerPressure     *int64         `json:"balancer_pressure_percent,omitempty" doc:"System-wide memory pressure; above 100 means VMs want more than the host can give."`
+	Interfaces           []HostNICPerf  `json:"interfaces,omitempty" doc:"Host network interfaces."`
+	Disks                []HostDiskPerf `json:"disks,omitempty" doc:"Host logical disks."`
+	Switches             []SwitchPerf   `json:"switches,omitempty" doc:"Virtual switch throughput."`
+	Notes                []string       `json:"notes,omitempty"`
 }
 
 // NUMANode is one host NUMA node.
