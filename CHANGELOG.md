@@ -2,6 +2,28 @@
 
 Notable changes to hvapi. The format follows [Keep a Changelog](https://keepachangelog.com/) and versions follow [Semantic Versioning](https://semver.org/). Each `## x.y.z` section becomes the release notes for that version.
 
+## 0.5.0 - 2026-10-20
+
+Deep VM detail.
+
+### Added
+
+- `/vms/{id}/integration`: every integration service with whether it is enabled and its live status.
+- `/vms/{id}/kvp`: guest intrinsic, guest-set and host-set key-value pairs.
+- `/vms/{id}/checkpoints`: the checkpoint tree with age, type, the current checkpoint, and each one's differencing disks with sizes and missing-file detection.
+- `/vms/{id}/disks/{diskId}/state` (on demand): VHD type, format, maximum and file size, fragmentation, and the full parent chain with `chain_broken` when a parent cannot be opened. Cached for 30 seconds.
+- `/vms/{id}/replication`: Hyper-V Replica state, health, last replication times, replica server, interval, recovery points and authentication.
+- `/vms/{id}/devices`: GPU partitions, PCI Express devices, COM ports, 3D display controller, virtual Fibre Channel ports, DVD drives.
+- `/vms/{id}/security`: Secure Boot and template, virtual TPM, shielding, state and migration traffic encryption.
+- `/vms/{id}/metering`: resource metering values when enabled.
+- `/vms/{id}/thumbnail` (on demand): PNG screenshot of the console, `?width=&height=`.
+- `/vms/{id}` now includes integration, checkpoints, replication, security and devices.
+- The OpenAPI document describes binary responses and query parameters.
+
+### Fixed
+
+- Numeric values WMI delivers as strings with a fractional part (real64) were truncated to integers.
+
 ## 0.4.0 - 2026-10-20
 
 Host and networking.

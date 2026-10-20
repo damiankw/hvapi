@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -16,6 +17,7 @@ type Deps struct {
 	Data       func() *hyperv.Data
 	Status     func() hyperv.Status
 	CertExpiry func() (time.Time, bool) // when serving TLS: the certificate's NotAfter
+	OnDemand   *hyperv.OnDemand         // disk state and thumbnails; nil disables them
 }
 
 func (s *state) data() *hyperv.Data {
@@ -28,30 +30,7 @@ func (s *state) data() *hyperv.Data {
 // vmRoutes are the phase 2 endpoints. Every one serves from the cache.
 func (s *state) vmRoutes() []route {
 	const tag = "vms"
-	vmDesc := "{id} is the VM's GUID (as in /vms) or its exact display name; a name is also matched case-insensitively when unique. "
-	part := func(path, summary, desc string, resp any, build func(d *hyperv.Data, id string) (any, error)) route {
-		return route{
-			Operation: openapi.Operation{
-				Method: "GET", Path: path, Tag: tag, Auth: true,
-				Summary: summary, Description: vmDesc + desc, Response: resp,
-				Errors: []int{http.StatusNotFound, http.StatusServiceUnavailable},
-			},
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				d := s.data()
-				id, err := d.Resolve(r.PathValue("id"))
-				if err != nil {
-					writeDataErr(w, err)
-					return
-				}
-				v, err := build(d, id)
-				if err != nil {
-					writeDataErr(w, err)
-					return
-				}
-				writeJSON(w, http.StatusOK, v)
-			},
-		}
-	}
+	part := s.vmPart
 	return []route{
 		{
 			Operation: openapi.Operation{
@@ -126,6 +105,33 @@ func (s *state) vmRoutes() []route {
 	}
 }
 
+const vmDesc = "{id} is the VM's GUID (as in /vms) or its exact display name; a name is also matched case-insensitively when unique. "
+
+// vmPart is a route that resolves {id} and serves one cached part of a VM.
+func (s *state) vmPart(path, summary, desc string, resp any, build func(d *hyperv.Data, id string) (any, error)) route {
+	return route{
+		Operation: openapi.Operation{
+			Method: "GET", Path: path, Tag: "vms", Auth: true,
+			Summary: summary, Description: vmDesc + desc, Response: resp,
+			Errors: []int{http.StatusNotFound, http.StatusServiceUnavailable},
+		},
+		handler: func(w http.ResponseWriter, r *http.Request) {
+			d := s.data()
+			id, err := d.Resolve(r.PathValue("id"))
+			if err != nil {
+				writeDataErr(w, err)
+				return
+			}
+			v, err := build(d, id)
+			if err != nil {
+				writeDataErr(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, v)
+		},
+	}
+}
+
 func writeDataErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, hyperv.ErrNotReady):
@@ -133,6 +139,12 @@ func writeDataErr(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusServiceUnavailable, openapi.Error{Error: err.Error()})
 	case errors.Is(err, hyperv.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, openapi.Error{Error: err.Error()})
+	case errors.Is(err, hyperv.ErrNotRunning):
+		writeJSON(w, http.StatusConflict, openapi.Error{Error: err.Error()})
+	case errors.Is(err, hyperv.ErrOnDemandUnavailable):
+		writeJSON(w, http.StatusServiceUnavailable, openapi.Error{Error: err.Error()})
+	case errors.Is(err, context.DeadlineExceeded):
+		writeJSON(w, http.StatusGatewayTimeout, openapi.Error{Error: "the host did not answer in time: " + err.Error()})
 	default:
 		writeJSON(w, http.StatusInternalServerError, openapi.Error{Error: err.Error()})
 	}

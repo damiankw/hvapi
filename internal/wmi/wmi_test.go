@@ -29,7 +29,7 @@ func TestCheckMethod(t *testing.T) {
 func TestRowAccessors(t *testing.T) {
 	r := Row{
 		"S": "text", "U64": "18446744073709551615", "I32": int32(-5), "U16": uint16(7), "B": true,
-		"Arr": []any{"a", nil, int32(2)}, "Nums": []any{"1", int32(2), uint64(3)}, "F": float64(1.5), "N": nil,
+		"Arr": []any{"a", nil, int32(2)}, "Nums": []any{"1", int32(2), uint64(3)}, "F": float64(1.5), "FS": "12.5", "N": nil,
 	}
 	if r.String("S") != "text" || r.String("N") != "" || r.String("missing") != "" || r.String("I32") != "-5" {
 		t.Error("String")
@@ -43,7 +43,7 @@ func TestRowAccessors(t *testing.T) {
 	if got := r.Ints("Nums"); len(got) != 3 || got[0] != 1 || got[2] != 3 {
 		t.Errorf("Ints = %v", got)
 	}
-	if !r.Bool("B") || r.Bool("N") || !r.Has("S") || r.Has("N") || r.Float("F") != 1.5 {
+	if !r.Bool("B") || r.Bool("N") || !r.Has("S") || r.Has("N") || r.Float("F") != 1.5 || r.Float("FS") != 12.5 {
 		t.Error("Bool/Has/Float")
 	}
 	if Escape(`C:\x 'q'`) != `C:\\x \'q\'` {

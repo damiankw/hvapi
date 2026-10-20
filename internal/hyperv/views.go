@@ -276,6 +276,11 @@ func (d *Data) Detail(id string) (*VMDetail, error) {
 	out.Memory, _ = d.Memory(id)
 	out.Disks, _ = d.Disks(id)
 	out.Network, _ = d.Network(id)
+	out.Integration, _ = d.Integration(id)
+	out.Checkpoints, _ = d.Checkpoints(id)
+	out.Replication, _ = d.Replication(id)
+	out.Security, _ = d.Security(id)
+	out.Devices, _ = d.Devices(id)
 	return out, nil
 }
 

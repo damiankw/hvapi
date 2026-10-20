@@ -7,7 +7,7 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 - HTTPS built in, API key and IP allowlist on every request
 - Documents itself: Swagger UI at `/docs`, OpenAPI at `/openapi.json`
 
-> **Status:** 0.4.x covers the VMs (inventory, summary, configuration, processor, memory, disks, network), the host (hardware, OS, services, storage, network, performance, NUMA, hypervisor, migration, cluster) and virtual switches, all over HTTPS. Checkpoint, event and performance history endpoints are planned; the roadmap is in `CLAUDE.md`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+> **Status:** 0.5.x covers the VMs in depth (inventory, summary, configuration, processor, memory, disks and disk state, network, integration services, key-value pairs, checkpoints, replication, devices, security, metering, console thumbnails), the host (hardware, OS, services, storage, network, performance, NUMA, hypervisor, migration, cluster) and virtual switches, all over HTTPS. Jobs, event logs, performance counters and diagnostics are planned; the roadmap is in `CLAUDE.md`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Secure the connection first
 
@@ -102,6 +102,15 @@ All endpoints are `GET` and need the API key except `/health`, `/docs` and `/ope
 | `/vms/{id}/memory` | Startup/min/max, dynamic memory, assigned, demand and pressure |
 | `/vms/{id}/disks` | Controllers, drives and the VHD, ISO or physical disk in each |
 | `/vms/{id}/network` | Adapters, MAC, switch, VLAN, guest addresses |
+| `/vms/{id}/integration` | Each integration service: enabled in settings, status from the guest |
+| `/vms/{id}/kvp` | Key-value pair data: guest intrinsic, guest-set, host-set |
+| `/vms/{id}/checkpoints` | Checkpoint tree with age, type, current marker and differencing disk sizes |
+| `/vms/{id}/disks/{diskId}/state` | **On demand:** VHD type, format, sizes, fragmentation and the full parent chain, `chain_broken` when a parent is missing |
+| `/vms/{id}/replication` | Hyper-V Replica state, health, last replication, replica server and settings |
+| `/vms/{id}/devices` | GPU partitions, PCI pass-through, COM ports, 3D display, Fibre Channel, DVD drives |
+| `/vms/{id}/security` | Secure Boot and template, TPM, shielding, encryption settings |
+| `/vms/{id}/metering` | Resource metering values when enabled |
+| `/vms/{id}/thumbnail` | **On demand:** PNG of the console (`?width=&height=`), running VMs only |
 | `/host` | Hardware, OS, memory, processors, Hyper-V defaults, VM counts |
 | `/host/services` | vmms, vmcompute and hvhost state; `all_running` to alert on |
 | `/host/storage` | Volumes and cluster shared volumes with free space, health and which VMs live there |
@@ -116,6 +125,8 @@ All endpoints are `GET` and need the API key except `/health`, `/docs` and `/ope
 | `/switches/{id}/ports` | Host-side and VM ports with VLAN settings |
 
 Data that a host does not have (for example dynamic memory counters, or guest details when integration services are off) is left out and explained in a `notes` array rather than failing the request. A `503` with `Retry-After` means the poller has not completed its first run yet.
+
+The two **on demand** endpoints are the only ones that touch the host when called. They use the read-only WMI methods `GetVirtualHardDiskSettingData`, `GetVirtualHardDiskState` and `GetVirtualSystemThumbnailImage`, with a 20 second timeout (`504` when exceeded), and disk results are cached for 30 seconds. Everything else is served from the cache.
 
 ## API documentation
 

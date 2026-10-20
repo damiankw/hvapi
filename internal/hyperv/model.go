@@ -248,14 +248,19 @@ type VMNetwork struct {
 
 // VMDetail is the /vms/{id} response: everything known about one VM.
 type VMDetail struct {
-	VM        VM           `json:"vm"`
-	Summary   VMSummary    `json:"summary"`
-	Config    *VMConfig    `json:"config,omitempty" doc:"Absent until the heavy poll has run."`
-	Processor *VMProcessor `json:"processor,omitempty"`
-	Memory    *VMMemory    `json:"memory,omitempty"`
-	Disks     *VMDisks     `json:"disks,omitempty"`
-	Network   *VMNetwork   `json:"network,omitempty"`
-	Notes     []string     `json:"notes,omitempty"`
+	VM          VM             `json:"vm"`
+	Summary     VMSummary      `json:"summary"`
+	Config      *VMConfig      `json:"config,omitempty" doc:"Absent until the heavy poll has run."`
+	Processor   *VMProcessor   `json:"processor,omitempty"`
+	Memory      *VMMemory      `json:"memory,omitempty"`
+	Disks       *VMDisks       `json:"disks,omitempty"`
+	Network     *VMNetwork     `json:"network,omitempty"`
+	Integration *VMIntegration `json:"integration,omitempty"`
+	Checkpoints *VMCheckpoints `json:"checkpoints,omitempty"`
+	Replication *VMReplication `json:"replication,omitempty"`
+	Security    *VMSecurity    `json:"security,omitempty"`
+	Devices     *VMDevices     `json:"devices,omitempty"`
+	Notes       []string       `json:"notes,omitempty"`
 }
 
 // SourceStatus describes one WMI query the poller runs.

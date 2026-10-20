@@ -54,6 +54,7 @@ var tags = []openapi.Tag{
 // the mux and written into the OpenAPI document.
 func (s *state) routes() []route {
 	routes := append(s.serviceRoutes(), s.vmRoutes()...)
+	routes = append(routes, s.deepRoutes()...)
 	return append(routes, s.hostRoutes()...)
 }
 

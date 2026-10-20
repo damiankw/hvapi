@@ -415,7 +415,7 @@ func serve(ctx context.Context, cfgPath string, asService, force bool) error {
 	defer stopPoll()
 	go poller.Run(pollCtx)
 
-	deps := server.Deps{Data: poller.Data, Status: poller.Status}
+	deps := server.Deps{Data: poller.Data, Status: poller.Status, OnDemand: hyperv.NewOnDemand(client, poller.Data)}
 	var reloader *tlscert.Reloader
 	if cfg.TLSEnabled() {
 		reloader, err = tlscert.NewReloader(cfg.TLSCertPath, cfg.TLSKeyPath)

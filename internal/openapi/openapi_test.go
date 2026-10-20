@@ -83,6 +83,20 @@ type loop struct {
 	Next *loop `json:"next"`
 }
 
+func TestContentTypeAndQueryParams(t *testing.T) {
+	doc := Build(Info{}, nil, []Operation{
+		{Method: "GET", Path: "/img", Response: "", ContentType: "image/png", Params: []Param{{Name: "width", Description: "w", Type: "integer"}}},
+		{Method: "GET", Path: "/txt", Response: "", ContentType: "text/plain; version=0.0.4"},
+	})
+	raw, _ := json.Marshal(doc)
+	s := string(raw)
+	for _, want := range []string{`"image/png":{"schema":{"format":"binary","type":"string"}}`, `"in":"query","name":"width"`, `"type":"integer"`, `"text/plain; version=0.0.4":{"schema":{"type":"string"}}`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("document lacks %s\n%s", want, s)
+		}
+	}
+}
+
 func TestRecursiveType(t *testing.T) {
 	doc := Build(Info{}, nil, []Operation{{Method: "GET", Path: "/", Response: loop{}}})
 	if _, err := json.Marshal(doc); err != nil {

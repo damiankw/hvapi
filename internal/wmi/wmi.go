@@ -156,13 +156,20 @@ func (r Row) Ints(name string) []int64 {
 	}
 }
 
-// Float returns a numeric property as float64.
+// Float returns a numeric property as float64. Strings are parsed, since
+// WMI delivers real64 and uint64 values that way.
 func (r Row) Float(name string) float64 {
 	switch v := r[name].(type) {
 	case float32:
 		return float64(v)
 	case float64:
 		return v
+	case string:
+		if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			return f
+		}
+		n, _ := toInt64(v)
+		return float64(n)
 	default:
 		n, _ := toInt64(v)
 		return float64(n)

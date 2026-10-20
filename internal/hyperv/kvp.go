@@ -5,35 +5,45 @@ import (
 	"strings"
 )
 
-// kvpItem is one Msvm_KvpExchangeDataItem serialised as CIM XML, which is how
-// Msvm_KvpExchangeComponent exposes guest key/value pairs.
-type kvpItem struct {
+// cimInstance is a CIM instance serialised as XML (DTD 2.0), which is how
+// WMI embeds objects in string properties and method results.
+type cimInstance struct {
+	ClassName  string `xml:"CLASSNAME,attr"`
 	Properties []struct {
 		Name  string `xml:"NAME,attr"`
 		Value string `xml:"VALUE"`
 	} `xml:"PROPERTY"`
+	Arrays []struct {
+		Name   string   `xml:"NAME,attr"`
+		Values []string `xml:"VALUE.ARRAY>VALUE"`
+	} `xml:"PROPERTY.ARRAY"`
+}
+
+// ParseCIMXML decodes one embedded instance into a property map. Array
+// properties are joined with ";". Returns nil if the text is not an instance.
+func ParseCIMXML(text string) map[string]string {
+	var inst cimInstance
+	if err := xml.Unmarshal([]byte(text), &inst); err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, p := range inst.Properties {
+		out[p.Name] = p.Value
+	}
+	for _, a := range inst.Arrays {
+		out[a.Name] = strings.Join(a.Values, ";")
+	}
+	return out
 }
 
 // ParseKVP turns the XML strings of GuestIntrinsicExchangeItems (or
-// GuestExchangeItems) into a name to value map.
+// GuestExchangeItems, HostExchangeItems) into a name to value map.
 func ParseKVP(items []string) map[string]string {
 	out := map[string]string{}
 	for _, raw := range items {
-		var it kvpItem
-		if err := xml.Unmarshal([]byte(raw), &it); err != nil {
-			continue
-		}
-		var name, data string
-		for _, p := range it.Properties {
-			switch p.Name {
-			case "Name":
-				name = p.Value
-			case "Data":
-				data = p.Value
-			}
-		}
-		if name != "" {
-			out[name] = data
+		props := ParseCIMXML(raw)
+		if name := props["Name"]; name != "" {
+			out[name] = props["Data"]
 		}
 	}
 	return out

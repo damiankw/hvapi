@@ -20,9 +20,18 @@ type Operation struct {
 	Summary     string
 	Description string
 	Tag         string
-	Auth        bool  // needs an API key
-	Response    any   // zero value of the 200 response type
-	Errors      []int // extra error statuses beyond the common ones
+	Auth        bool    // needs an API key
+	Response    any     // zero value of the 200 response type
+	ContentType string  // of the 200 response when not JSON, e.g. "image/png"
+	Params      []Param // query parameters
+	Errors      []int   // extra error statuses beyond the common ones
+}
+
+// Param is a query parameter.
+type Param struct {
+	Name        string
+	Description string
+	Type        string // "string", "integer", "boolean"; default string
 }
 
 // Tag groups operations in the rendered documentation.
@@ -108,12 +117,17 @@ type builder struct {
 var pathParam = regexp.MustCompile(`\{([^}/.]+)(\.\.\.)?\}`)
 
 func (b *builder) operation(op Operation, errRef any) map[string]any {
-	responses := map[string]any{
-		"200": map[string]any{
-			"description": "OK",
-			"content":     jsonContent(b.schema(reflect.TypeOf(op.Response))),
-		},
+	var ok map[string]any
+	if op.ContentType != "" && op.ContentType != "application/json" {
+		schema := map[string]any{"type": "string", "format": "binary"}
+		if strings.HasPrefix(op.ContentType, "text/") {
+			schema = map[string]any{"type": "string"}
+		}
+		ok = map[string]any{"description": "OK", "content": map[string]any{op.ContentType: map[string]any{"schema": schema}}}
+	} else {
+		ok = map[string]any{"description": "OK", "content": jsonContent(b.schema(reflect.TypeOf(op.Response)))}
 	}
+	responses := map[string]any{"200": ok}
 	statuses := []int{http.StatusForbidden, http.StatusMethodNotAllowed}
 	if op.Auth {
 		statuses = append(statuses, http.StatusUnauthorized, http.StatusTooManyRequests)
@@ -147,6 +161,16 @@ func (b *builder) operation(op Operation, errRef any) map[string]any {
 			"in":       "path",
 			"required": true,
 			"schema":   map[string]any{"type": "string"},
+		})
+	}
+	for _, q := range op.Params {
+		typ := q.Type
+		if typ == "" {
+			typ = "string"
+		}
+		params = append(params, map[string]any{
+			"name": q.Name, "in": "query", "required": false, "description": q.Description,
+			"schema": map[string]any{"type": typ},
 		})
 	}
 	if len(params) > 0 {

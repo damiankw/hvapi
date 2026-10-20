@@ -105,6 +105,13 @@ func TestVMEndpointsWithStubPoller(t *testing.T) {
 	if code, body := get("/status"); code != 200 || !strings.Contains(body, `"wmi_available": false`) {
 		t.Errorf("/status = %d %s", code, body)
 	}
+	// On-demand endpoints without a caller wired in are unavailable, not errors.
+	if code, _ := get("/vms/x/disks/scsi0-0/state"); code != 503 {
+		t.Errorf("disk state = %d", code)
+	}
+	if code, _ := get("/vms/x/thumbnail"); code != 503 {
+		t.Errorf("thumbnail = %d", code)
+	}
 }
 
 // Every route the server registers must be in the OpenAPI document with the

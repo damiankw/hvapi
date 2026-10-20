@@ -26,6 +26,11 @@ var stateSources = []source{
 	{"processor", wmi.NSVirtualization, "SELECT * FROM Msvm_Processor", true},
 	{"memory", wmi.NSVirtualization, "SELECT * FROM Msvm_Memory", true},
 	{"heartbeat", wmi.NSVirtualization, "SELECT * FROM Msvm_HeartbeatComponent", true},
+	{"shutdown_component", wmi.NSVirtualization, "SELECT * FROM Msvm_ShutdownComponent", true},
+	{"timesync_component", wmi.NSVirtualization, "SELECT * FROM Msvm_TimeSyncComponent", true},
+	{"vss_component", wmi.NSVirtualization, "SELECT * FROM Msvm_VssComponent", true},
+	{"guest_service_component", wmi.NSVirtualization, "SELECT * FROM Msvm_GuestServiceInterfaceComponent", true},
+	{"replication_relationships", wmi.NSVirtualization, "SELECT * FROM Msvm_ReplicationRelationship", true},
 	{"dynamic_memory_counters", wmi.NSCIMv2, "SELECT * FROM Win32_PerfFormattedData_BalancerStats_HyperVDynamicMemoryVM", true},
 	// Host (phase 4): things that change by the minute.
 	{"host_services", wmi.NSCIMv2, "SELECT Name, DisplayName, State, StartMode, Status, ProcessId, StartName, ExitCode FROM Win32_Service WHERE Name = 'vmms' OR Name = 'vmcompute' OR Name = 'hvhost'", false},
@@ -72,6 +77,25 @@ var settingsSources = []source{
 	{"switch_ports", wmi.NSVirtualization, "SELECT * FROM Msvm_EthernetSwitchPort", true},
 	{"switch_extensions", wmi.NSVirtualization, "SELECT * FROM Msvm_EthernetSwitchExtension", true},
 	{"device_guard", `root\Microsoft\Windows\DeviceGuard`, "SELECT * FROM Win32_DeviceGuard", true},
+	// Deep VM detail (phase 5).
+	{"heartbeat_settings", wmi.NSVirtualization, "SELECT * FROM Msvm_HeartbeatComponentSettingData", true},
+	{"shutdown_settings", wmi.NSVirtualization, "SELECT * FROM Msvm_ShutdownComponentSettingData", true},
+	{"timesync_settings", wmi.NSVirtualization, "SELECT * FROM Msvm_TimeSyncComponentSettingData", true},
+	{"vss_settings", wmi.NSVirtualization, "SELECT * FROM Msvm_VssComponentSettingData", true},
+	{"guest_service_settings", wmi.NSVirtualization, "SELECT * FROM Msvm_GuestServiceInterfaceComponentSettingData", true},
+	{"kvp_settings", wmi.NSVirtualization, "SELECT * FROM Msvm_KvpExchangeComponentSettingData", true},
+	{"replication_settings", wmi.NSVirtualization, "SELECT * FROM Msvm_ReplicationSettingData", true},
+	{"security_settings", wmi.NSVirtualization, "SELECT * FROM Msvm_SecuritySettingData", true},
+	{"gpu_partitions", wmi.NSVirtualization, "SELECT * FROM Msvm_GpuPartitionSettingData", true},
+	{"pci_express", wmi.NSVirtualization, "SELECT * FROM Msvm_PciExpressSettingData", true},
+	{"serial_ports", wmi.NSVirtualization, "SELECT * FROM Msvm_SerialPortSettingData", true},
+	{"display_3d", wmi.NSVirtualization, "SELECT * FROM Msvm_Synth3dDisplayControllerSettingData", true},
+	{"fibre_channel_ports", wmi.NSVirtualization, "SELECT * FROM Msvm_SyntheticFcPortSettingData", true},
+	{"metric_values", wmi.NSVirtualization, "SELECT * FROM Msvm_AggregationMetricValue", true},
+	{"metric_definitions", wmi.NSVirtualization, "SELECT * FROM Msvm_AggregationMetricDefinition", true},
+	{"metric_links", wmi.NSVirtualization, "SELECT Antecedent, Dependent FROM Msvm_MetricForME", true},
+	{"image_service", wmi.NSVirtualization, "SELECT * FROM Msvm_ImageManagementService", true},
+	{"management_service", wmi.NSVirtualization, "SELECT * FROM Msvm_VirtualSystemManagementService", true},
 }
 
 // rowSet is the raw result of one poll: rows and errors per source.
@@ -137,11 +161,24 @@ type StateData struct {
 }
 
 type vmState struct {
-	cs        wmi.Row
-	procs     []wmi.Row
-	mem       []wmi.Row
-	heartbeat wmi.Row
-	dynMem    wmi.Row
+	cs          wmi.Row
+	procs       []wmi.Row
+	mem         []wmi.Row
+	heartbeat   wmi.Row
+	dynMem      wmi.Row
+	components  map[string]wmi.Row // integration components by source name
+	replication wmi.Row            // Msvm_ReplicationRelationship
+}
+
+// componentSources are the runtime integration component classes, by the
+// source name of the component and of its setting data.
+var componentSources = []struct{ name, label, settings string }{
+	{"heartbeat", "Heartbeat", "heartbeat_settings"},
+	{"shutdown_component", "Operating system shutdown", "shutdown_settings"},
+	{"timesync_component", "Time synchronization", "timesync_settings"},
+	{"vss_component", "Backup (volume shadow copy)", "vss_settings"},
+	{"guest_service_component", "Guest services", "guest_service_settings"},
+	{"kvp", "Data exchange (key-value pairs)", "kvp_settings"},
 }
 
 func buildState(rs *rowSet) *StateData {
@@ -151,7 +188,7 @@ func buildState(rs *rowSet) *StateData {
 		if !IsGUID(id) {
 			continue
 		}
-		d.vms[id] = &vmState{cs: r}
+		d.vms[id] = &vmState{cs: r, components: map[string]wmi.Row{}}
 		d.order = append(d.order, id)
 	}
 	sort.Slice(d.order, func(i, j int) bool {
@@ -174,6 +211,18 @@ func buildState(rs *rowSet) *StateData {
 	for _, r := range rs.rows["heartbeat"] {
 		if v := d.vms[NormalizeID(r.String("SystemName"))]; v != nil {
 			v.heartbeat = r
+		}
+	}
+	for _, c := range componentSources {
+		for _, r := range rs.rows[c.name] {
+			if v := d.vms[NormalizeID(r.String("SystemName"))]; v != nil {
+				v.components[c.name] = r
+			}
+		}
+	}
+	for _, r := range rs.rows["replication_relationships"] {
+		if v := d.vms[VMIDFromInstanceID(r.String("InstanceID"))]; v != nil {
+			v.replication = r
 		}
 	}
 	// Performance counters are keyed by display name, not ID.
@@ -200,6 +249,7 @@ type SettingsData struct {
 type vmSettings struct {
 	vssd      wmi.Row
 	snapshots int
+	snapList  []*snapshot
 	proc      wmi.Row
 	mem       wmi.Row
 	rasd      []wmi.Row
@@ -209,7 +259,20 @@ type vmSettings struct {
 	vlans     []wmi.Row
 	guestNet  []wmi.Row
 	kvp       map[string]string
+	kvpRow    wmi.Row
+	kvpHost   wmi.Row // Msvm_KvpExchangeComponentSettingData
+	compSet   map[string]wmi.Row
+	replSet   wmi.Row
+	security  wmi.Row
+	devices   map[string][]wmi.Row // by source name
+	metrics   []wmi.Row
 	linkNotes []string
+}
+
+// snapshot is one checkpoint's settings and the disks it owns.
+type snapshot struct {
+	vssd wmi.Row
+	sasd []wmi.Row
 }
 
 const (
@@ -220,9 +283,11 @@ const (
 func buildSettings(rs *rowSet) *SettingsData {
 	d := &SettingsData{rowSet: rs, vms: map[string]*vmSettings{}, switches: map[string]string{}}
 
-	// Realized system settings define the VMs; snapshot settings are counted.
+	// Realized system settings define the VMs; snapshot settings are kept
+	// per VM for /checkpoints.
 	vssdPathToVM := map[string]string{}
 	snapshotIDs := map[string]bool{}
+	snapByPath := map[string]*snapshot{}
 	for _, r := range rs.rows["system_settings"] {
 		t := r.String("VirtualSystemType")
 		switch {
@@ -234,7 +299,7 @@ func buildSettings(rs *rowSet) *SettingsData {
 			if id == "" {
 				continue
 			}
-			d.vms[id] = &vmSettings{vssd: r}
+			d.vms[id] = &vmSettings{vssd: r, compSet: map[string]wmi.Row{}, devices: map[string][]wmi.Row{}}
 			vssdPathToVM[NormPath(r.String(wmi.PathKey))] = id
 		case strings.HasPrefix(t, typeSnapshot):
 			snapshotIDs[NormalizeID(r.String("ConfigurationID"))] = true
@@ -244,6 +309,9 @@ func buildSettings(rs *rowSet) *SettingsData {
 		if strings.HasPrefix(r.String("VirtualSystemType"), typeSnapshot) {
 			if v := d.vms[NormalizeID(r.String("VirtualSystemIdentifier"))]; v != nil {
 				v.snapshots++
+				sn := &snapshot{vssd: r}
+				v.snapList = append(v.snapList, sn)
+				snapByPath[NormPath(r.String(wmi.PathKey))] = sn
 			}
 		}
 	}
@@ -253,9 +321,13 @@ func buildSettings(rs *rowSet) *SettingsData {
 	// the VM GUID; a second segment naming a snapshot means it is not the
 	// realized configuration.
 	partToVM := map[string]string{}
+	partToSnap := map[string]*snapshot{}
 	for _, r := range rs.rows["settings_components"] {
-		if id, ok := vssdPathToVM[NormPath(r.String("GroupComponent"))]; ok {
+		group := NormPath(r.String("GroupComponent"))
+		if id, ok := vssdPathToVM[group]; ok {
 			partToVM[NormPath(r.String("PartComponent"))] = id
+		} else if sn, ok := snapByPath[group]; ok {
+			partToSnap[NormPath(r.String("PartComponent"))] = sn
 		}
 	}
 	useAssoc := len(partToVM) > 0
@@ -294,6 +366,62 @@ func buildSettings(rs *rowSet) *SettingsData {
 	for _, r := range rs.rows["storage_allocation"] {
 		if v := owner(r); v != nil {
 			v.sasd = append(v.sasd, r)
+		} else if useAssoc {
+			if sn := partToSnap[NormPath(r.String(wmi.PathKey))]; sn != nil {
+				sn.sasd = append(sn.sasd, r)
+			}
+		} else if segs := instanceSegments(r.String("InstanceID")); len(segs) > 1 && snapshotIDs[NormalizeID(segs[1])] {
+			for _, v := range d.vms {
+				for _, sn := range v.snapList {
+					if NormalizeID(sn.vssd.String("ConfigurationID")) == NormalizeID(segs[1]) {
+						sn.sasd = append(sn.sasd, r)
+					}
+				}
+			}
+		}
+	}
+	for _, c := range componentSources {
+		for _, r := range rs.rows[c.settings] {
+			if v := owner(r); v != nil {
+				v.compSet[c.name] = r
+			}
+		}
+	}
+	for _, r := range rs.rows["kvp_settings"] {
+		if v := owner(r); v != nil {
+			v.kvpHost = r
+		}
+	}
+	for _, r := range rs.rows["replication_settings"] {
+		if v := d.vms[VMIDFromInstanceID(r.String("InstanceID"))]; v != nil {
+			v.replSet = r
+		}
+	}
+	for _, r := range rs.rows["security_settings"] {
+		if v := owner(r); v != nil {
+			v.security = r
+		} else if v := d.vms[VMIDFromInstanceID(r.String("InstanceID"))]; v != nil && v.security == nil {
+			v.security = r
+		}
+	}
+	for _, name := range []string{"gpu_partitions", "pci_express", "serial_ports", "display_3d", "fibre_channel_ports"} {
+		for _, r := range rs.rows[name] {
+			if v := owner(r); v != nil {
+				v.devices[name] = append(v.devices[name], r)
+			}
+		}
+	}
+	// Metering: value -> VM through Msvm_MetricForME.
+	valueByPath := map[string]wmi.Row{}
+	for _, r := range rs.rows["metric_values"] {
+		valueByPath[NormPath(r.String(wmi.PathKey))] = r
+	}
+	for _, l := range rs.rows["metric_links"] {
+		vmID := NormalizeID(PathKey(l.String("Antecedent"), "Name"))
+		if v := d.vms[vmID]; v != nil {
+			if val := valueByPath[NormPath(l.String("Dependent"))]; val != nil {
+				v.metrics = append(v.metrics, val)
+			}
 		}
 	}
 	for _, name := range []string{"synthetic_ethernet_ports", "emulated_ethernet_ports"} {
@@ -325,6 +453,7 @@ func buildSettings(rs *rowSet) *SettingsData {
 	for _, r := range rs.rows["kvp"] {
 		if v := d.vms[NormalizeID(r.String("SystemName"))]; v != nil {
 			v.kvp = ParseKVP(r.Strings("GuestIntrinsicExchangeItems"))
+			v.kvpRow = r
 		}
 	}
 	if !useAssoc && len(rs.rows["system_settings"]) > 0 {
