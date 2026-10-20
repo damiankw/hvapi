@@ -185,6 +185,116 @@ func TestSpecMatchesRoutes(t *testing.T) {
 	}
 }
 
+// The OpenAPI document marks every field without omitempty as required.
+// Required must mean never null: encode each route's zero-value response
+// the way the handlers do and walk the document checking.
+func TestRequiredFieldsAreNeverNull(t *testing.T) {
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Responses map[string]struct {
+				Content map[string]struct {
+					Schema map[string]any `json:"schema"`
+				} `json:"content"`
+			} `json:"responses"`
+		} `json:"paths"`
+		Components struct {
+			Schemas map[string]map[string]any `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(Spec(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	var walk func(path string, schema map[string]any, value any)
+	walk = func(path string, schema map[string]any, value any) {
+		if ref, ok := schema["$ref"].(string); ok {
+			name := strings.TrimPrefix(ref, "#/components/schemas/")
+			schema = doc.Components.Schemas[name]
+		}
+		if all, ok := schema["allOf"].([]any); ok && len(all) > 0 {
+			walk(path, all[0].(map[string]any), value)
+			return
+		}
+		switch schema["type"] {
+		case "object":
+			obj, ok := value.(map[string]any)
+			if !ok {
+				if value == nil && path != "" {
+					t.Errorf("%s: required object is null", path)
+				}
+				return
+			}
+			req, _ := schema["required"].([]any)
+			props, _ := schema["properties"].(map[string]any)
+			for _, r := range req {
+				name := r.(string)
+				v, present := obj[name]
+				if !present {
+					t.Errorf("%s.%s: required field missing", path, name)
+					continue
+				}
+				if v == nil {
+					t.Errorf("%s.%s: required field is null", path, name)
+					continue
+				}
+				if ps, ok := props[name].(map[string]any); ok {
+					walk(path+"."+name, ps, v)
+				}
+			}
+		case "array":
+			if value == nil {
+				t.Errorf("%s: required array is null", path)
+			}
+		}
+	}
+	for p, ops := range doc.Paths {
+		for _, op := range ops {
+			c, ok := op.Responses["200"].Content["application/json"]
+			if !ok {
+				continue
+			}
+			var zero any
+			for _, r := range (&state{}).routes() {
+				if r.Path == p {
+					zero = r.Response
+				}
+			}
+			raw, err := json.Marshal(normalize(zero))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded any
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			walk(p, c.Schema, decoded)
+		}
+	}
+}
+
+func TestNormalize(t *testing.T) {
+	type inner struct {
+		Tags []string          `json:"tags"`
+		M    map[string]int    `json:"m"`
+		P    *[]int            `json:"p,omitempty"`
+		Any  any               `json:"any,omitempty"` // an empty interface has nothing to fill; such fields must be optional
+		List []inner           `json:"list"`
+		Deep map[string][]bool `json:"deep"`
+	}
+	v := inner{List: []inner{{}}, Deep: map[string][]bool{"k": nil}}
+	raw, _ := json.Marshal(normalize(v))
+	if strings.Contains(string(raw), "null") {
+		t.Errorf("nulls remain: %s", raw)
+	}
+	ptr := &inner{}
+	normalize(ptr)
+	if ptr.Tags == nil || ptr.M == nil {
+		t.Error("pointer not normalized in place")
+	}
+	if normalize(nil) != nil {
+		t.Error("nil")
+	}
+}
+
 func TestServedSpecIsTheSame(t *testing.T) {
 	srv := testServer(t)
 	r := httptest.NewRequest("GET", "/openapi.json", nil)

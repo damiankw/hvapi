@@ -223,7 +223,13 @@ The account needs to read Hyper-V data: membership of **Hyper-V Administrators**
 
 ## Testing an installation
 
-`Test-Hvapi.ps1` ships in the release zip. It reads the endpoint list from the running service, calls every endpoint with real parameters taken from the host (a VM, one of its disks, a switch), checks that a wrong key, a missing key and a POST are rejected, and prints a table and a summary:
+`Test-Hvapi.ps1` ships in the release zip. It reads the endpoint list from the running service, calls every endpoint with real parameters taken from the host (a VM, one of its disks, a switch), checks that a wrong key, a missing key and a POST are rejected, and prints a table and a summary. It tests the data, not only the connection: every JSON response is checked three ways.
+
+- **Schema.** Against the service's own OpenAPI document: every field the API marks required is present and not null, every value has the documented type, timestamps parse. The service guarantees that a required field is never null (a test in the Go code enforces it), so a null here is a defect.
+- **Plausibility.** Rules for values that cannot be right on a working host: a running VM with 0 processors or 0 MB assigned, a volume with more free space than size, a host with no logical processors, an unknown state name, a MAC address that is not one, a poller source that is required but returned no rows.
+- **Consistency.** Figures that must agree across endpoints: VM counts between `/vms`, `/vms/summary`, `/host` and `/metrics`; the chosen VM's state, memory and processor count between its endpoints.
+
+Each problem is printed under its endpoint, and any problem makes the endpoint FAIL. `-SelfTest` runs the validators against built-in samples, one of them a VM with a null name and 0 MB of memory, and shows what gets caught.
 
 ```powershell
 .\Test-Hvapi.ps1 -Uri https://10.0.0.10:8085 -ApiKey <your key>
@@ -235,7 +241,7 @@ The account needs to read Hyper-V data: membership of **Hyper-V Administrators**
 | --- | --- |
 | `PASS` | 200 with data |
 | `WARN` | 200 but something was missing: a `notes` entry, an empty list, or an expected condition such as a thumbnail of a VM that is off |
-| `FAIL` | Error status, timeout or unreadable response |
+| `FAIL` | Error status, timeout, unreadable response, or any data problem (listed under the endpoint) |
 | `SKIP` | Nothing on the host to test it with (no VM, no VHD, no switch) |
 
 The exit code is 1 when anything failed, 2 when the service could not be reached. It waits and retries when it hits the per-key rate limit, so it is safe with the default limits. Works in Windows PowerShell 5.1 and PowerShell 7.

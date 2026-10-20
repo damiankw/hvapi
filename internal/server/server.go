@@ -122,7 +122,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.WriteHeader(code)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(v)
+	_ = enc.Encode(normalize(v))
 }
 
 // goVersion is reported by /version.
