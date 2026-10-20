@@ -20,18 +20,19 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 - **WMI layer rules:** every call runs on its own OS-thread-locked goroutine with its own COM apartment and a context timeout. Arrays of embedded objects need the custom reader in `safearray_windows.go` because go-ole cannot read them. Outside Windows the client returns `wmi.ErrUnavailable`, so the service runs (empty data, notes) on Linux for development.
 - **Collector design:** `internal/hyperv` runs a fixed list of whole-class queries per poll (one query per class, not one per VM) and groups rows by VM in Go. Resource settings are linked to their VM through `Msvm_VirtualSystemSettingDataComponent`; if that returns nothing, by InstanceID prefix with snapshot configurations excluded. `/vms/summary` is built from queryable classes (`Msvm_Processor.LoadPercentage`, `Msvm_Memory`, `Msvm_HeartbeatComponent`, KVP intrinsic items, dynamic memory counters) rather than the `GetSummaryInformation` method, so phase 2 needs no method calls; `wmi.Client.Call` exists with the allowlist for phase 4.
 - **Response shape:** every VM response carries `collected_at` and `notes`. A missing optional source is a note, never an error. `503` with `Retry-After` only before the first poll completes. `/status` exposes every source's row count and error for debugging on the host.
-- **Build:** GitHub Actions builds `hvapi.exe` on push to `main` and publishes a release on `v*` tags. `go.sum` is committed; CI still runs `go mod tidy` as a safety net.
+- **Build and release:** `.github/workflows/ci.yml` runs on every push and PR (tidy check, gofmt, vet for both targets, tests, dev build artifact). `.github/workflows/release.yml` runs on `v*` tags or manually from the Actions tab with a version input (it then creates the tag); it builds with version ldflags, packages a zip plus `SHA256SUMS.txt`, takes release notes from the matching `## x.y.z` section of `CHANGELOG.md`, and marks suffixed versions (`-beta.1`) as pre-releases. **Every release needs a CHANGELOG.md section first.** CI uses the latest stable Go; `go.mod` states the minimum (1.22). `go.sum` is committed.
+- **Licence:** MIT (`LICENSE`).
 
 ## Status
 
 **Phase 1 (foundation) is done:** config loading and validation, API key, IP allowlist, rate limit, JSON logging, Windows service install/uninstall/run, `hash-key`, `configure`, `show-config`, `help` and `openapi` commands, `/health` (no key), `/version`, `/openapi.json` and `/docs`. Tests sit next to each package.
 
-**Phase 2 (core VM data) is written but not yet verified on a real host:** read-only WMI client with query and method allowlists, cache and two-interval poller, `/status`, `/vms`, `/vms/summary`, `/vms/{id}` and its `summary`, `config`, `processor`, `memory`, `disks`, `network`, plus the `hvapi wmi` command for querying a host. Tests use recorded-style fixtures (`internal/hyperv/fixtures_test.go`). **Next step before phase 3:** run it on a Hyper-V host, check `/status` for failing sources, and fix property names or linking that differ from the fixtures. Known uncertainties: the dynamic memory counter class name, the exact InstanceID layout of snapshot settings (only matters for the fallback path), and whether `Msvm_EthernetSwitchPortVlanSettingData` InstanceIDs start with the connection's InstanceID.
+**Phase 2 (core VM data) is done and confirmed on a real Hyper-V host** (`/status` and `/vms/summary` verified by the owner): read-only WMI client with query and method allowlists, cache and two-interval poller, start-up preflight (refuses an unelevated console when WMI denies access; `run -force` overrides; warnings in `/status`), `/status`, `/vms`, `/vms/summary`, `/vms/{id}` and its `summary`, `config`, `processor`, `memory`, `disks`, `network`, plus the `hvapi wmi` command. Tests use recorded-style fixtures (`internal/hyperv/fixtures_test.go`). Released as **v0.2.0**. Items still worth confirming from a host's `/status` output when convenient: the dynamic memory counter class name, the InstanceID layout of snapshot settings (only matters for the fallback linking path), and whether `Msvm_EthernetSwitchPortVlanSettingData` InstanceIDs start with the connection's InstanceID.
 
 ## Build phases
 
 1. Foundation: done.
-2. Core VM data: done, pending verification on a host.
+2. Core VM data: done (v0.2.0).
 3. Host and networking: all `/host/*` endpoints and `/switches/*`.
 4. Deep VM detail: `integration`, `kvp`, `checkpoints`, `disks/{diskId}/state`, `replication`, `devices`, `security`, `metering`, `thumbnail`.
 5. Activity and performance: `/jobs`, `/events`, `/events/{log}`, host and VM `/perf`.
@@ -55,6 +56,5 @@ Perf counter class names are unconfirmed; verify on a real host before relying o
 
 ## Open questions
 
-- Licence (MIT suggested).
-- Can a non-admin account read everything, or does the service need Hyper-V Administrators?
+- Can a non-admin account read everything, or does the service need Hyper-V Administrators? (Confirmed so far: an unelevated prompt gets access denied; elevated works. A plain Hyper-V Administrators member has not been tested.)
 - Confirm perf counter class names on Server 2019, 2022 and 2025.

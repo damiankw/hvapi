@@ -5,13 +5,25 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
 - One self-contained `hvapi.exe`, nothing to install on the host
 - Read-only by design: only `GET` requests, no VM changes of any kind
 - API key and IP allowlist on every request
+- Documents itself: Swagger UI at `/docs`, OpenAPI at `/openapi.json`
 
-> **Status:** phase 2 (core VM data). VM inventory, summary, configuration, processor, memory, disks and network are in. Host, switch, checkpoint, event and performance endpoints are still to come; the full plan is in `CLAUDE.md`. Phase 2 has not yet been verified against a real Hyper-V host; see [Verifying on a host](#verifying-on-a-host).
+> **Status:** 0.2.x covers VM inventory, summary, configuration, processor, memory, disks and network. Host, switch, checkpoint, event and performance endpoints are planned; the roadmap is in `CLAUDE.md`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+## Requirements
+
+- Windows Server 2016 or later with the Hyper-V role (Windows 10/11 with Hyper-V also works). hvapi reads the `root\virtualization\v2` WMI namespace.
+- An elevated prompt to run it interactively, or a service account in **Hyper-V Administrators**.
+- Nothing else: no runtime, no agent, no PowerShell.
 
 ## Quick start
 
-1. Download `hvapi.exe` and `config.example.json` from the latest [release](../../releases), or from the build artifacts under [Actions](../../actions).
-2. Put both in a folder on the Hyper-V host, for example `C:\Program Files\hvapi\`.
+1. Download `hvapi-<version>-windows-amd64.zip` from the latest [release](../../releases/latest) and check it against `SHA256SUMS.txt` if you like:
+
+   ```powershell
+   Get-FileHash .\hvapi.exe -Algorithm SHA256
+   ```
+
+2. Unpack it into a folder on the Hyper-V host, for example `C:\Program Files\hvapi\`.
 3. Create `config.json` with the guided setup. It explains every setting, suggests values, and can generate the API key for you:
 
    ```powershell
@@ -33,7 +45,7 @@ A lightweight, **read-only** HTTP/JSON API that runs on a Hyper-V host and expos
    | `allowed_cidrs` | Address ranges or single IPs allowed to connect. |
    | `rate_limit` | Requests per second and burst size, per key. |
    | `log_file` | Log path. Relative paths sit next to `config.json`. |
-   | `poll` | Poll intervals in seconds (used from phase 2). |
+   | `poll` | How often the cache is refreshed: `state_seconds` for VM state and load, `heavy_seconds` for configuration. |
    | `tls` | Reserved for HTTPS later. Leave empty. |
 
 5. Test it from an **elevated** console (Run as administrator), because reading Hyper-V data needs it:
@@ -116,7 +128,7 @@ curl -H "X-API-Key: <your key>" http://10.0.0.10:8085/version
 sc.exe config hvapi obj= "DOMAIN\svc-hvapi" password= "..."
 ```
 
-The account needs to read Hyper-V data: membership of **Hyper-V Administrators** (and, from phase 5, **Event Log Readers** for event endpoints). If `/status` shows access denied errors, this is the first thing to check.
+The account needs to read Hyper-V data: membership of **Hyper-V Administrators** (event log endpoints, when they arrive, will also need **Event Log Readers**). If `/status` shows access denied errors, this is the first thing to check.
 
 ## Troubleshooting
 
@@ -148,13 +160,20 @@ hvapi help [command]              Show help, or details of one command
 
 `configure`, `show-config`, `hash-key` and `openapi` also run on Linux and macOS, so a config can be prepared on a workstation and copied to the host.
 
-## Building
+## Building and releasing
 
-Every push to `main` builds `hvapi.exe` with GitHub Actions; download it from the run's artifacts. Pushing a tag such as `v0.1.0` also publishes a release.
+Two GitHub Actions workflows:
+
+- **ci** runs on every push and pull request: module tidiness, `gofmt`, `go vet` for Linux and Windows, tests, and a development build of `hvapi.exe` attached to the run as an artifact.
+- **release** publishes a GitHub release with `hvapi.exe`, a zip, `config.example.json`, `openapi.json` and `SHA256SUMS.txt`. Start it from the **Actions** tab (release, Run workflow, enter a version such as `v0.3.0`; the tag is created for you), or push a tag. A version with a suffix such as `v0.3.0-beta.1` becomes a pre-release. The release notes are taken from the matching section of `CHANGELOG.md`, so add that section first.
 
 To build locally (Go 1.22 or later, on any OS):
 
 ```bash
 go test ./...
-GOOS=windows GOARCH=amd64 go build -o hvapi.exe ./cmd/hvapi
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o hvapi.exe ./cmd/hvapi
 ```
+
+## Licence
+
+[MIT](LICENSE).

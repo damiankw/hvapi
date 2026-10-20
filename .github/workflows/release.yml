@@ -1,0 +1,123 @@
+name: release
+
+# Two ways to release:
+#   1. Actions tab -> release -> Run workflow: pick the branch and enter a
+#      version such as v0.2.0. The workflow creates the tag on that branch.
+#   2. Push a tag: git tag v0.2.0 && git push origin v0.2.0
+# Either way it tests, builds hvapi.exe, packages it with checksums and
+# publishes a GitHub release. A version with a suffix (v0.3.0-beta.1) is
+# marked as a pre-release.
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, for example v0.2.0. A tag with this name is created on the selected branch.'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            V="${INPUT_VERSION}"
+          else
+            V="${GITHUB_REF_NAME}"
+          fi
+          if ! printf '%s' "$V" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "Version must look like v1.2.3 or v1.2.3-beta.1, got '$V'" >&2
+            exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          case "$V" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "Releasing $V"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Vet and test
+        run: |
+          go vet ./...
+          GOOS=windows GOARCH=amd64 go vet ./...
+          go test ./...
+
+      - name: Create tag (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          V: ${{ steps.ver.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$V" >/dev/null 2>&1; then
+            echo "Tag $V already exists; push a new version or delete the tag first." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$V" -m "hvapi $V"
+          git push origin "refs/tags/$V"
+
+      - name: Build and package
+        env:
+          V: ${{ steps.ver.outputs.version }}
+        run: |
+          COMMIT="${GITHUB_SHA::7}"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LD="-s -w \
+            -X github.com/damiankw/hvapi/internal/version.Version=${V} \
+            -X github.com/damiankw/hvapi/internal/version.Commit=${COMMIT} \
+            -X github.com/damiankw/hvapi/internal/version.Date=${DATE}"
+          mkdir -p dist
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$LD" -o dist/hvapi.exe ./cmd/hvapi
+          cp config.example.json README.md LICENSE dist/
+          go run -ldflags "$LD" ./cmd/hvapi openapi -o dist/openapi.json
+          (cd dist && zip -q "hvapi-${V}-windows-amd64.zip" hvapi.exe config.example.json openapi.json README.md LICENSE)
+          (cd dist && sha256sum hvapi.exe "hvapi-${V}-windows-amd64.zip" config.example.json openapi.json > SHA256SUMS.txt)
+          cat dist/SHA256SUMS.txt
+
+      - name: Release notes from CHANGELOG.md
+        env:
+          V: ${{ steps.ver.outputs.version }}
+        run: |
+          awk -v ver="${V#v}" '/^## /{ p = ($2 == ver) } p' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            printf '## %s\n\nSee the commit history for changes in this release.\n' "$V" > notes.md
+          fi
+          {
+            echo
+            echo '### Install'
+            echo
+            echo "Download \`hvapi-${V}-windows-amd64.zip\`, unpack it on the Hyper-V host, then run \`hvapi.exe configure\` from an elevated prompt. The README inside has the full steps. Verify downloads against \`SHA256SUMS.txt\`."
+          } >> notes.md
+          cat notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: hvapi ${{ steps.ver.outputs.version }}
+          body_path: notes.md
+          prerelease: ${{ steps.ver.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          files: |
+            dist/hvapi-${{ steps.ver.outputs.version }}-windows-amd64.zip
+            dist/hvapi.exe
+            dist/config.example.json
+            dist/openapi.json
+            dist/SHA256SUMS.txt
